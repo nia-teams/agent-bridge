@@ -15,7 +15,7 @@
     "verify:docs": "node --test scripts/verify-docs.mjs"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "@types/node": "^20.19.0",
     "@types/ws": "^8.18.0",
     "esbuild": "^0.25.0"
