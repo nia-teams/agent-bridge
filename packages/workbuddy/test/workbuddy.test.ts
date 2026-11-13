@@ -104,19 +104,21 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
   const infoPath = join(authDir, 'workbuddy-desktop.info');
   await mkdir(authDir, { recursive: true });
   await t.test('plain desktop accessToken and account uid are passed only to the child env', async () => {
-    await writeFile(infoPath, JSON.stringify({ auth: { accessToken: 'plain-desktop-token' }, account: { uid: 'desktop-user' } }));
+    const desktopToken = randomBytes(24).toString('hex');
+    await writeFile(infoPath, JSON.stringify({ auth: { accessToken: desktopToken }, account: { uid: 'desktop-user' } }));
     const env = (await invoke()).options.env;
-    assert.equal(env.CODEBUDDY_AUTH_TOKEN, 'plain-desktop-token');
+    assert.equal(env.CODEBUDDY_AUTH_TOKEN, desktopToken);
     assert.equal(env.ACC_USER_ID, 'desktop-user');
     assert.equal(process.env.CODEBUDDY_AUTH_TOKEN, undefined);
     assert.equal(process.env.ACC_USER_ID, undefined);
   });
   await t.test('explicit token bypasses desktop lookup and explicit uid is preserved', async () => {
-    process.env.CODEBUDDY_AUTH_TOKEN = 'explicit-token';
+    const explicitToken = randomBytes(24).toString('hex');
+    process.env.CODEBUDDY_AUTH_TOKEN = explicitToken;
     await writeFile(infoPath, 'not JSON');
     const env = (await invoke()).options.env;
     assert.equal(env.CODEBUDDY_AUTH_TOKEN, undefined);
-    assert.equal({ ...process.env, ...env }.CODEBUDDY_AUTH_TOKEN, 'explicit-token');
+    assert.equal({ ...process.env, ...env }.CODEBUDDY_AUTH_TOKEN, explicitToken);
     delete process.env.CODEBUDDY_AUTH_TOKEN;
     await writeFile(infoPath, JSON.stringify({ auth: { accessToken: 'plain' }, account: { uid: 'desktop-user' } }));
     process.env.ACC_USER_ID = 'explicit-user';
@@ -124,10 +126,11 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
     delete process.env.ACC_USER_ID;
   });
   await t.test('other .info files are considered but preferred desktop credentials win', async () => {
-    await writeFile(join(authDir, 'other.info'), JSON.stringify({ auth: { accessToken: 'other-token' }, account: { uid: 42 } }));
+    const otherToken = randomBytes(24).toString('hex');
+    await writeFile(join(authDir, 'other.info'), JSON.stringify({ auth: { accessToken: otherToken }, account: { uid: 42 } }));
     assert.equal((await invoke()).options.env.CODEBUDDY_AUTH_TOKEN, 'plain');
     await writeFile(infoPath, '{}');
-    assert.equal((await invoke()).options.env.CODEBUDDY_AUTH_TOKEN, 'other-token');
+    assert.equal((await invoke()).options.env.CODEBUDDY_AUTH_TOKEN, otherToken);
     assert.equal((await invoke()).options.env.ACC_USER_ID, '42');
     await writeFile(join(authDir, 'other.info'), '{broken');
     assert.equal((await invoke()).options.env.CODEBUDDY_AUTH_TOKEN, undefined);
@@ -152,7 +155,7 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
     const electron = join(app, 'Contents/MacOS/Electron');
     const bootstrap = join(home, 'mock-electron.cjs');
     const log = join(home, 'mock-electron-log.jsonl');
-    const secret = 'test-only-at-rest-key';
+    const secret = randomBytes(32).toString('hex');
     await mkdir(join(app, 'Contents/MacOS'), { recursive: true });
     const lite = join(app, 'Contents/Resources/app.asar.unpacked/cli/dist/codebuddy-lite-wb.mjs');
     await mkdir(join(lite, '..'), { recursive: true });
@@ -170,7 +173,7 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
       };
       // Match Node's -e argv layout without writing the inline script to disk.
       process.argv = [process.execPath, authFilePath];
-      new Function('require', script)(require);
+      require('node:vm').runInNewContext(script, { require, process, Buffer }, { filename: 'mock-electron-inline.cjs' });
     `);
     const shellQuote = value => "'" + value.replace(/'/g, "'\\''") + "'";
     await writeFile(electron, `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(bootstrap)} "$@"\n`);
@@ -214,7 +217,8 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
       assert.equal(entry.nodeOptions, '');
       assert.equal(entry.authFilePath, infoPath);
       assert.match(entry.script, /readFileSync\(process.argv\[1\]/);
-      assert.doesNotMatch(entry.script, /decrypted-token|test-only-at-rest-key|mkdtemp|writeFile|--require/);
+      assert.doesNotMatch(entry.script, /decrypted-token|mkdtemp|writeFile|--require/);
+      assert.doesNotMatch(entry.script, new RegExp(secret));
     }
     // Failed authentication must not be cached or expose any secret/output.
     const invalid = encrypted('do-not-leak');
@@ -224,7 +228,8 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
     await save(invalid, 3000);
     for (let i = 0; i < 2; i++) await assert.rejects(invoke(binary), error => {
       assert.match(error.message, /Unable to decrypt WorkBuddy desktop credentials/);
-      assert.doesNotMatch(String(error.stack), /do-not-leak|test-only-at-rest-key/);
+      assert.doesNotMatch(String(error.stack), /do-not-leak/);
+      assert.doesNotMatch(String(error.stack), new RegExp(secret));
       return true;
     });
     assert.equal((await count()).length, 4);
@@ -233,15 +238,18 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
     assert.equal(process.env.NODE_OPTIONS, '--require /nonexistent/host-preload.cjs');
     assert.equal(process.env.ELECTRON_RUN_AS_NODE, '0');
     // Captured child output/errors must never be attached as an error cause or properties.
+    const failedChildToken = randomBytes(24).toString('hex');
     for (const [output, exitCode, expected] of [
-      ['token-and-key-do-not-leak', 0, /returned no token/],
+      [failedChildToken, 0, /returned no token/],
       [JSON.stringify({ token: '' }), 0, /returned no token/],
-      [JSON.stringify({ token: 'token-and-key-do-not-leak' }), 9, /Unable to decrypt/],
+      [JSON.stringify({ token: failedChildToken }), 9, /Unable to decrypt/],
     ]) {
       await writeFile(bootstrap, `process.stdout.write(${JSON.stringify(output)}); process.stderr.write('secret-stderr-do-not-leak'); process.exit(${exitCode});`);
       await assert.rejects(invoke(binary), error => {
         assert.match(error.message, expected);
-        assert.doesNotMatch(String(error.stack) + JSON.stringify(error), /token-and-key-do-not-leak|secret-stderr-do-not-leak|test-only-at-rest-key/);
+        assert.doesNotMatch(String(error.stack) + JSON.stringify(error), /secret-stderr-do-not-leak/);
+        assert.doesNotMatch(String(error.stack) + JSON.stringify(error), new RegExp(secret));
+        assert.doesNotMatch(String(error.stack) + JSON.stringify(error), new RegExp(failedChildToken));
         assert.equal(error.cause, undefined);
         return true;
       });
@@ -264,7 +272,8 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
       else process.env[key] = original[key];
     }
   });
-  process.env.CODEBUDDY_AUTH_TOKEN = 'test-explicit-token';
+  const explicitToken = randomBytes(24).toString('hex');
+  process.env.CODEBUDDY_AUTH_TOKEN = explicitToken;
   delete process.env.CODEBUDDY_BIN;
   delete process.env.ACC_PRODUCT_CONFIG_PATH;
   process.env.CODEBUDDY_CONFIG_DIR = join(root, 'config');
@@ -307,7 +316,7 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
     assert.equal(turn.spawn.cwd, root);
     assert.equal(turn.spawn.env.PATH, process.env.PATH);
     assert.equal(turn.spawn.env.HOME, process.env.HOME);
-    assert.equal(turn.spawn.env.CODEBUDDY_AUTH_TOKEN, 'test-explicit-token');
+    assert.equal(turn.spawn.env.CODEBUDDY_AUTH_TOKEN, explicitToken);
     assert.equal(turn.spawn.env.CODEBUDDY_CONFIG_DIR, join(root, 'config'));
     assert.equal(turn.spawn.env.WORKBUDDY_CONFIG_DIR, join(root, 'config'));
     assert.equal(turn.spawn.env.ACC_PRODUCT_CONFIG_PATH, product);
