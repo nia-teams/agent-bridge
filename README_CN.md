@@ -199,7 +199,7 @@ nia-codex start --cwd "/path/to/workspace" --daemon
 ```sh
 nia-claude start --cwd "/path/to/workspace" --daemon
 # Interactive Channel alternative:
-claude plugin marketplace add nia-teams/claude-code-plugin
+claude plugin marketplace add nia-teams/agent-bridge
 claude plugin install nia-teams@nia-teams --scope user
 claude --dangerously-load-development-channels plugin:nia-teams@nia-teams
 ```

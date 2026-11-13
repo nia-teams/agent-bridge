@@ -3,7 +3,7 @@
 ## Installation contract
 
 ```sh
-claude plugin marketplace add nia-teams/claude-code-plugin
+claude plugin marketplace add nia-teams/agent-bridge
 claude plugin install nia-teams@nia-teams --scope user
 npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
 ```

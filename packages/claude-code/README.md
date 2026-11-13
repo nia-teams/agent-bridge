@@ -13,7 +13,7 @@ nia-claude start --cwd "." --daemon
 Interactive Channel installation:
 
 ```sh
-claude plugin marketplace add nia-teams/claude-code-plugin
+claude plugin marketplace add nia-teams/agent-bridge
 claude plugin install nia-teams@nia-teams --scope user
 npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
 ```
@@ -51,13 +51,13 @@ npm install -g @nia-teams/claude-code-plugin
 Interactive Channel mode uses a Claude Code version supporting Channels and permission relay. Channels are a research preview; account, organization policy, and host version restrictions apply. Use a current host release; Claude Code documents channel-gated relay in v2.1.234 and later.
 
 ```sh
-claude plugin marketplace add nia-teams/claude-code-plugin
+claude plugin marketplace add nia-teams/agent-bridge
 claude plugin install nia-teams@nia-teams --scope user
 ```
 
 Install once for all working directories on this computer. The plugin bundles its MCP startup configuration (`.mcp.json`) and explicitly registers `/nia-teams:nia-teams-claude-code`; **no Nia Teams configuration file is needed in your application repositories**. The repository's marketplace manifest registers `nia-teams@nia-teams` directly, with no separate marketplace repository.
 
-For a bare MCP host, the equivalent user-scoped CLI registration is `claude mcp add --scope user nia-teams -- npx -y @nia-teams/claude-code-plugin mcp` (replace `claude` with a compatible host such as `codebuddy`); local source development uses `claude mcp add --scope user nia-teams -- node /absolute/path/to/claude-code-plugin/bin/nia-claude.mjs mcp` after `npm ci && npm run build`. Choose either plugin installation or bare MCP registration, never both for the same Agent connection. Skills-only installation with `npx skills add nia-teams/claude-code-plugin` does not register the MCP server or enable a Channel.
+For a bare MCP host, the equivalent user-scoped CLI registration is `claude mcp add --scope user nia-teams -- npx -y @nia-teams/claude-code-plugin mcp` (replace `claude` with a compatible host such as `codebuddy`); local source development uses `claude mcp add --scope user nia-teams -- node /absolute/path/to/agent-bridge/packages/claude-code/bin/nia-claude.mjs mcp` after `npm ci && npm run build`. Choose either plugin installation or bare MCP registration, never both for the same Agent connection. Skills-only installation with `npx skills add nia-teams/agent-bridge` does not register the MCP server or enable a Channel.
 
 ### Step 2: Pair the Host & Create the External Agent
 
@@ -132,7 +132,7 @@ If this plugin is later listed and allowlisted in `claude-plugins-official`, ins
 For a CodeBuddy CLI release supporting the same plugin commands and Channel contract, use the equivalent user-scoped plugin installation and launch:
 
 ```sh
-codebuddy plugin marketplace add nia-teams/claude-code-plugin
+codebuddy plugin marketplace add nia-teams/agent-bridge
 codebuddy plugin install nia-teams@nia-teams --scope user
 codebuddy --dangerously-load-development-channels plugin:nia-teams@nia-teams
 ```

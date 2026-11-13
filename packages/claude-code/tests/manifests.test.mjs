@@ -41,6 +41,19 @@ test('marketplace, plugin and package identities and versions remain aligned', a
   assert.equal(pkg.repository.url, `${plugin.repository}.git`);
 });
 
+test('repository marketplace resolves the packaged plugin and stays synchronized', async () => {
+  const [repositoryMarketplace, packageMarketplace] = await Promise.all([
+    json('../../.claude-plugin/marketplace.json'), json('.claude-plugin/marketplace.json'),
+  ]);
+  const entry = repositoryMarketplace.plugins[0];
+  assert.equal(entry.source, './packages/claude-code');
+  assert.equal(resolve(root, '../..', entry.source), resolve(root));
+  assert.deepEqual(repositoryMarketplace, {
+    ...packageMarketplace,
+    plugins: packageMarketplace.plugins.map(plugin => ({ ...plugin, source: './packages/claude-code' })),
+  });
+});
+
 test('plugin skill, MCP startup and package export references exist and are valid', async () => {
   const [plugin, mcp, pkg] = await Promise.all([json('.claude-plugin/plugin.json'), json('.mcp.json'), json('package.json')]);
   assert.deepEqual(plugin.skills, ['./skills/nia-teams-claude-code']);
@@ -72,7 +85,7 @@ test('installation guidance stays global and maintainer files remain synchronize
   for (const path of docs) {
     const text = await readFile(localPath(path), 'utf8');
     for (const command of [
-      'claude plugin marketplace add nia-teams/claude-code-plugin',
+      'claude plugin marketplace add nia-teams/agent-bridge',
       'claude plugin install nia-teams@nia-teams --scope user',
       "npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'",
       '--dangerously-load-development-channels plugin:nia-teams@nia-teams',

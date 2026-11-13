@@ -28,7 +28,7 @@ Connect local Claude Code into Nia Teams as an Agent that communicates two-way i
 ## Interactive Channel Setup
 
 ```sh
-claude plugin marketplace add nia-teams/claude-code-plugin
+claude plugin marketplace add nia-teams/agent-bridge
 claude plugin install nia-teams@nia-teams --scope user
 npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
 claude --dangerously-load-development-channels plugin:nia-teams@nia-teams

@@ -13,7 +13,7 @@ nia-claude start --cwd "." --daemon
 交互式 Channel 的安装方式：
 
 ```sh
-claude plugin marketplace add nia-teams/claude-code-plugin
+claude plugin marketplace add nia-teams/agent-bridge
 claude plugin install nia-teams@nia-teams --scope user
 npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
 ```
@@ -49,13 +49,13 @@ npm install -g @nia-teams/claude-code-plugin
 交互式 Channel 模式使用支持 Channels 与 Permission Relay 的 Claude Code 版本。Channels 处于 research preview，账号、组织策略与宿主版本均可能限制启用。建议使用当前版本；Claude Code 文档说明 v2.1.234 起权限转发受已注册 Channel 门禁约束。
 
 ```sh
-claude plugin marketplace add nia-teams/claude-code-plugin
+claude plugin marketplace add nia-teams/agent-bridge
 claude plugin install nia-teams@nia-teams --scope user
 ```
 
 本机安装一次，对所有工作目录生效。插件自带 MCP 启动配置（`.mcp.json`），并显式注册 `/nia-teams:nia-teams-claude-code`；**无需在业务代码仓库创建任何配置文件**。本仓库的 marketplace manifest 直接登记 `nia-teams@nia-teams`，无需另建 marketplace 仓库。
 
-不使用插件系统时，等价的用户级注册命令是 `claude mcp add --scope user nia-teams -- npx -y @nia-teams/claude-code-plugin mcp`（兼容宿主如 CodeBuddy CLI 可将 `claude` 替换为 `codebuddy`）；本地源码调试先运行 `npm ci && npm run build`，再使用 `claude mcp add --scope user nia-teams -- node /absolute/path/to/claude-code-plugin/bin/nia-claude.mjs mcp`。插件与纯 MCP 注册二选一，不要让两条连接竞争同一个 Agent。`npx skills add nia-teams/claude-code-plugin` 仅安装 Skill，不注册 MCP Server 或启用 Channel。
+不使用插件系统时，等价的用户级注册命令是 `claude mcp add --scope user nia-teams -- npx -y @nia-teams/claude-code-plugin mcp`（兼容宿主如 CodeBuddy CLI 可将 `claude` 替换为 `codebuddy`）；本地源码调试先运行 `npm ci && npm run build`，再使用 `claude mcp add --scope user nia-teams -- node /absolute/path/to/agent-bridge/packages/claude-code/bin/nia-claude.mjs mcp`。插件与纯 MCP 注册二选一，不要让两条连接竞争同一个 Agent。`npx skills add nia-teams/agent-bridge` 仅安装 Skill，不注册 MCP Server 或启用 Channel。
 
 ### 第 2 步：配对主机并创建外部 Agent
 
@@ -130,7 +130,7 @@ claude --dangerously-load-development-channels plugin:nia-teams@nia-teams
 对于支持相同插件命令及 Channel 协议的 CodeBuddy CLI 版本，使用对应的用户级安装与启动命令：
 
 ```sh
-codebuddy plugin marketplace add nia-teams/claude-code-plugin
+codebuddy plugin marketplace add nia-teams/agent-bridge
 codebuddy plugin install nia-teams@nia-teams --scope user
 codebuddy --dangerously-load-development-channels plugin:nia-teams@nia-teams
 ```
