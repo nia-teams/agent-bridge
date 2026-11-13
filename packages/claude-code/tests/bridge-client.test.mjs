@@ -1,0 +1,61 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { BridgeClient } from '../dist/index.js';
+import { fixture, message, until, sessionId } from './helpers.mjs';
+
+test('challenge → signed lease → hello/ready, heartbeat, concurrent dedup, and reconnect replay', async t => {
+  const f = await fixture(t); const errors = [];
+  const bridge = new BridgeClient(f.credentials, { heartbeatMs: 15, reconnectBaseMs: 10, onError: error => errors.push(error) });
+  t.after(() => bridge.close());
+  let count = 0; let accept;
+  bridge.onThreadMessage(async () => { count++; await new Promise(resolve => { accept = resolve; }); });
+  await bridge.start();
+  assert.deepEqual(await bridge.rpc('group_chat.history', { sessionId }), { text: 'Earlier chat' });
+  const frame = message(); f.send(frame); f.send(frame);
+  await until(() => count === 1); assert.equal(f.frames.filter(frame => frame.type === 'ack').length, 0);
+  accept();
+  await until(() => f.frames.filter(frame => frame.type === 'ack').length === 2);
+  await until(() => f.frames.some(frame => frame.type === 'heartbeat'));
+  f.holdRpc.add('group_chat.history');
+  const failed = assert.rejects(bridge.rpc('group_chat.history', { sessionId }), /disconnected/);
+  await until(() => f.rpcs.filter(rpc => rpc.method === 'group_chat.history').length === 2);
+  const old = f.socket; f.socket.terminate(); await failed;
+  await until(() => f.socket !== old, 'new handshake');
+  f.send(frame);
+  await until(() => f.frames.filter(frame => frame.type === 'ack').length === 3);
+  assert.equal(count, 1); assert.equal(f.connections, 2);
+  assert.equal(f.requests.filter(request => request.path.endsWith('/challenge')).length, 2);
+  bridge.close(); await assert.rejects(bridge.start(), /closed/);
+});
+test('failed acceptance is retried and RPC timeout/abort clean up', async t => {
+  const f = await fixture(t); const bridge = new BridgeClient(f.credentials, { rpcTimeoutMs: 40 });
+  t.after(() => bridge.close()); let attempts = 0;
+  bridge.onThreadMessage(() => { if (++attempts === 1) throw new Error('transient'); });
+  await bridge.start(); const frame = message(); f.send(frame);
+  await until(() => attempts === 1); assert.equal(f.frames.filter(frame => frame.type === 'ack').length, 0);
+  f.send(frame); await until(() => f.frames.some(frame => frame.type === 'ack')); assert.equal(attempts, 2);
+  f.holdRpc.add('group_chat.history');
+  await assert.rejects(bridge.rpc('group_chat.history', { sessionId }), /timeout/);
+  const abort = new AbortController();
+  const pending = bridge.rpc('group_chat.history', { sessionId }, abort.signal); abort.abort();
+  await assert.rejects(pending, /aborted/);
+});
+test('rotated keys fail before lease and superseded host stops reconnecting', async t => {
+  const f = await fixture(t); const bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 10 });
+  t.after(() => bridge.close()); f.keyGeneration = 2;
+  await assert.rejects(bridge.start(), /generation/); bridge.close();
+  assert.equal(f.requests.filter(request => request.path.endsWith('/lease')).length, 0);
+  f.keyGeneration = 1;
+  const replacement = new BridgeClient(f.credentials, { reconnectBaseMs: 10 }); t.after(() => replacement.close());
+  await replacement.start(); f.socket.close(4409, 'superseded');
+  await until(() => f.sockets.size === 0);
+  await assert.rejects(replacement.start(), /closed/);
+  assert.equal(f.connections, 1);
+});
+
+test('structured RPC errors preserve code and retryability', async t => {
+  const f = await fixture(t); const bridge = new BridgeClient(f.credentials); t.after(() => bridge.close());
+  await bridge.start();
+  f.handleRpc = (rpc, ws) => { ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 1, requestId: rpc.requestId, ok: false, error: { code: 'invalid_request', message: 'Invalid parameters', retryable: false } })); return true; };
+  await assert.rejects(bridge.rpc('group_chat.history', { sessionId }), error => error.code === 'invalid_request' && error.retryable === false && error.message === 'Invalid parameters');
+});

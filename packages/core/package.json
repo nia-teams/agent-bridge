@@ -1,0 +1,86 @@
+{
+  "name": "@nia-teams/agent-bridge-core",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README_CN.md",
+    "skills",
+    "docs",
+    "examples",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./crypto": {
+      "types": "./dist/crypto.d.ts",
+      "import": "./dist/crypto.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "import": "./dist/http.js"
+    },
+    "./credentials": {
+      "types": "./dist/credentials.d.ts",
+      "import": "./dist/credentials.js"
+    },
+    "./pairing": {
+      "types": "./dist/pairing.d.ts",
+      "import": "./dist/pairing.js"
+    },
+    "./bridge-client": {
+      "types": "./dist/bridge-client.d.ts",
+      "import": "./dist/bridge-client.js"
+    },
+    "./publications": {
+      "types": "./dist/publications.d.ts",
+      "import": "./dist/publications.js"
+    },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "import": "./dist/format.js"
+    },
+    "./state": {
+      "types": "./dist/state.d.ts",
+      "import": "./dist/state.js"
+    },
+    "./process": {
+      "types": "./dist/process.d.ts",
+      "import": "./dist/process.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "@nia-teams/mcp-sdk": "^0.1.0"
+  },
+  "author": "Nia Teams",
+  "homepage": "https://nia-teams.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nia-teams/agent-bridge.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "description": "Shared pairing, signed messaging, credentials, and session runtime for Nia Teams agent adapters"
+}

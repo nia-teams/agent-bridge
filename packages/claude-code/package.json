@@ -1,0 +1,66 @@
+{
+  "name": "@nia-teams/claude-code-plugin",
+  "version": "0.1.0",
+  "description": "Connect Claude Code to Nia Teams GroupChats and TaskBar human approval cards",
+  "type": "module",
+  "license": "MIT",
+  "author": "Nia Teams",
+  "homepage": "https://nia-teams.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nia-teams/agent-bridge.git",
+    "directory": "packages/claude-code"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "nia-claude": "bin/nia-claude.mjs"
+  },
+  "files": [
+    "dist",
+    "bin",
+    ".claude-plugin",
+    ".mcp.json",
+    "skills",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs",
+    "examples",
+    "README.md",
+    "README_CN.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@nia-teams/mcp-sdk": "^0.1.0",
+    "ws": "^8.18.0",
+    "zod": "^3.25.0 || ^4.0.0",
+    "@nia-teams/agent-bridge-core": "0.1.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.319"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/ws": "^8.18.0",
+    "typescript": "^5.9.3"
+  }
+}

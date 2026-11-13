@@ -1,0 +1,22 @@
+{
+  "name": "nia-teams",
+  "description": "Connect Claude Code to Nia Teams GroupChats and TaskBar human approval cards.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Nia Teams",
+    "url": "https://nia-teams.com"
+  },
+  "homepage": "https://nia-teams.com",
+  "repository": "https://github.com/nia-teams/agent-bridge",
+  "license": "MIT",
+  "keywords": [
+    "nia-teams",
+    "group-chat",
+    "channel",
+    "approval",
+    "mcp"
+  ],
+  "skills": [
+    "./skills/nia-teams-claude-code"
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "nia-teams": {"command": "npx", "args": ["-y", "@nia-teams/claude-code-plugin", "mcp"]}
+  }
+}

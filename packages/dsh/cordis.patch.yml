@@ -1,0 +1,3 @@
+- insert:
+    - id: nia-teams
+      name: '@nia-teams/dsh-plugin'
