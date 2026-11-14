@@ -54,7 +54,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.5",
-    "@nia-teams/mcp-sdk": "^0.1.0",
+    "@nia-teams/mcp-sdk": "^0.1.1",
     "ws": "^8.18.0",
     "@nia-teams/agent-bridge-core": "0.1.1"
   },
