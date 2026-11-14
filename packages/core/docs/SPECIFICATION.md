@@ -447,3 +447,27 @@ Only a verified approved action allows the pending host request. Canceled or inv
 Incoming messages carry sender metadata, for example `[chat:<chatId>] Alice (<userId>): ...`, or `senderId` in structured channel payloads. This bridge's raw `thread.message` uses `messages[].authorId`; its formatted prompt lists `Alice (<userId>)` and member IDs. Use the received sender/member ID, not the display name.
 
 To notify a member with a native Nia Teams highlight, emit `<mention userId="<userId>" />` in the published reply. Plain `@Name` is text, not a real mention. Do not invent IDs; consult the member list/history if needed.
+
+## Invite-code registration and group creation
+
+`inviteCode` is `raw.trim().toUpperCase()` and must match `/^[A-Z0-9_-]{4,64}$/`. First registration requires `userName` and `agentName`, each normalized with `raw.replace(/\s+/g, ' ').trim()` and of length 1–60 (JavaScript string length). The host generates an Ed25519 keypair and `registrationNonce = randomBytes(32).toString('base64url')`.
+
+The UTF-8 signature input has no trailing newline:
+
+```text
+nia-agent-bridge-invite-v1
+<inviteCode>
+<userName>
+<agentName>
+<registrationNonce>
+```
+
+`POST /api/agent-bridge/pairing/invite` accepts `{ inviteCode, userName, agentName, publicKey, registrationNonce, signature, hostLabel, clientName?, avatar? }`. `publicKey` is SPKI PEM; `signature` is an Ed25519 signature encoded as base64. `hostLabel` defaults to `<hostPrefix or agent-bridge>@<hostname>`; branding follows section 1.2.
+
+Success returns `{ ok: true, userId, teamId, agentSlug, agentName, issuer, keyGeneration, groupChatId, handoffUrl }`. Credentials retain the locally generated keypair and are saved in a `0700` directory with file mode `0600`.
+
+For existing same-server credentials, the host requests `POST /api/agent-bridge/challenge` with `{ teamId }`, verifies `teamId` and `keyGeneration`, and signs the challenge using section 1.4. It then sends `POST /api/agent-bridge/invite-group-chat` with `{ teamId, challengeId, signature, inviteCode }`. Success returns `{ ok: true, userId, teamId, agentSlug, agentName, groupChatId, handoffUrl }`; stored credentials remain unchanged. Challenge failures (including 404) or changed key generations require explicit re-pairing. Names do not authorize replacement registration. An explicitly different server URL selects first registration.
+
+`connectWithInvite` returns `{ mode: 'paired' | 'reused', credentials, userId, groupChatId, handoffUrl, browserOpened }`. `openBrowser: false` disables browser launch. `NIA_NO_BROWSER` suppresses connection browser launch; `openBrowser` itself honors `NIA_NO_BROWSER=1`. Browser commands use argument arrays without a shell: `open` on macOS, `rundll32.exe url.dll,FileProtocolHandler` on Windows, and `xdg-open` elsewhere. Only HTTP(S) URLs are accepted; spawn failures return `false`. `browserOpened` means the opener spawned, not that a page finished loading.
+
+Invite handoff URLs must be absolute HTTP(S) URLs without a username or password. HTTPS server origins require HTTPS handoff URLs. The handoff host and port may differ from the request origin (for example, a configured public base URL behind a reverse proxy). Validation applies before saving new credentials, returning the result, or opening a browser, including when browser launch is disabled.

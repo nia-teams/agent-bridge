@@ -289,6 +289,6 @@ npm test
 npm run verify:docs
 ```
 
-Protocol map: [docs/SPECIFICATION.md](./docs/SPECIFICATION.md). Package `dist/**/*.d.ts` files define interfaces, `skills/` guides consumer AI, and core `examples/` contains runnable ESM pairing and message examples. Update both language guides, skills, and tests when public contracts change.
+Protocol map: [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) (invite-code onboarding: [docs/INVITE-CONNECT.md](./docs/INVITE-CONNECT.md)). Package `dist/**/*.d.ts` files define interfaces, `skills/` guides consumer AI, and core `examples/` contains runnable ESM pairing and message examples. Update both language guides, skills, and tests when public contracts change.
 
 [MIT](./LICENSE) © Nia Teams

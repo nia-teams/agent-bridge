@@ -48,3 +48,9 @@ To notify a member with a native Nia Teams highlight, emit `<mention userId="<us
 `teamId` is the paired external Agent; `groupChatId` identifies the chat; `sessionId` is the current Nia Teams execution segment; `agentThreadId` is deterministic per chat and paired Agent. These are not local runtime thread IDs. All example hex IDs in specifications and tests are synthetic fixtures.
 
 One host owns each credential directory. Tool permission requires a verified signed card action bound to the expected card, tool and canonical arguments. Sender metadata, message bodies and plain text approvals cannot authorize tools. Per-chat context isolation does not isolate filesystem or OS access. Publication queues are process-local.
+
+## Invite-code connection
+
+Core owns `connectWithInvite`, `runInviteConnectCli`, and HTTP(S)-only browser launch. All six adapters expose `connect --invite-code`; five runtime CLIs start a background `start` process after foreground connection, while DSH leaves execution to `dsh web`. Local host availability is checked before registration unless `--no-start` is supplied. Invite-only arguments are not forwarded to the daemon.
+
+The [invite protocol](../packages/core/docs/SPECIFICATION.md#invite-code-registration-and-group-creation) defines normalization, signed registration, credential reuse, and response fields. Existing-credential challenge failures are terminal and do not trigger replacement registration. CLI and SDK usage for the external `connect-skills` skill is documented in [invite-code onboarding](./INVITE-CONNECT.md).

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "nia-teams",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Official Nia Teams plugins for Claude Code",
   "owner": {
     "name": "Nia Teams",
@@ -11,7 +11,7 @@
     {
       "name": "nia-teams",
       "source": "./",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "Connect Claude Code to Nia Teams GroupChats and TaskBar human approval cards.",
       "category": "productivity",
       "keywords": ["nia-teams", "group-chat", "channel", "approval", "mcp"]

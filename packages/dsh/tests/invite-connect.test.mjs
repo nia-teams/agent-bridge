@@ -1,0 +1,19 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { promisify } from 'node:util';
+import { execFile } from 'node:child_process';
+import { inviteFixture } from '../../core/tests/invite-fixture.mjs';
+const exec = promisify(execFile);
+const entry = new URL('../bin/nia-dsh.mjs', import.meta.url);
+test('connect CLI pairs in foreground and reuses credentials without names', async t => {
+  const f = await inviteFixture(t);
+  const common = ['connect', '--invite-code', ' ab_cd-12 ', '--server-url', f.url, '--config-dir', f.dir, '--no-browser', '--no-start'];
+  const first = await exec(process.execPath, [entry.pathname, ...common, '--user-name', 'Alice Example', '--agent-name', 'Local Helper']);
+  assert.match(first.stdout, /Agent: Local Helper \(@external-helper\)/);
+  assert.match(first.stdout, /GroupChat: group-fixture/);
+  assert.ok(first.stdout.includes(`Handoff URL: ${f.url}/handoff`));
+  const second = await exec(process.execPath, [entry.pathname, ...common]);
+  assert.match(second.stdout, /GroupChat: group-fixture/);
+  assert.deepEqual(f.requests.map(r => r.path), ['/api/agent-bridge/pairing/invite', '/api/agent-bridge/challenge', '/api/agent-bridge/invite-group-chat']);
+  assert.match(first.stdout, /dsh web/);
+});

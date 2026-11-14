@@ -1,6 +1,6 @@
 {
   "name": "@nia-teams/claude-code-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Connect Claude Code to Nia Teams GroupChats and TaskBar human approval cards",
   "type": "module",
   "license": "MIT",
@@ -55,7 +55,7 @@
     "@nia-teams/mcp-sdk": "^0.1.0",
     "ws": "^8.18.0",
     "zod": "^3.25.0 || ^4.0.0",
-    "@nia-teams/agent-bridge-core": "0.1.0",
+    "@nia-teams/agent-bridge-core": "0.1.1",
     "@anthropic-ai/claude-agent-sdk": "0.3.319"
   },
   "devDependencies": {

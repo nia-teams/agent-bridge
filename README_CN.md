@@ -289,6 +289,6 @@ npm test
 npm run verify:docs
 ```
 
-协议入口：[docs/SPECIFICATION.md](./docs/SPECIFICATION.md)。各包的 `dist/**/*.d.ts` 提供接口签名，`skills/` 提供接入方 AI 操作指引；core 的 `examples/` 包含可运行 ESM 配对与消息示例。修改公共契约时同步更新中英文文档、Skill 与测试。
+协议入口：[docs/SPECIFICATION.md](./docs/SPECIFICATION.md)（邀请码接入见 [docs/INVITE-CONNECT_CN.md](./docs/INVITE-CONNECT_CN.md)）。各包的 `dist/**/*.d.ts` 提供接口签名，`skills/` 提供接入方 AI 操作指引；core 的 `examples/` 包含可运行 ESM 配对与消息示例。修改公共契约时同步更新中英文文档、Skill 与测试。
 
 [MIT](./LICENSE) © Nia Teams

@@ -1,7 +1,7 @@
 {
   "name": "nia-teams",
   "description": "Connect Claude Code to Nia Teams GroupChats and TaskBar human approval cards.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "Nia Teams",
     "url": "https://nia-teams.com"
