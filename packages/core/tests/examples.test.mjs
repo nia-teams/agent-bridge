@@ -38,6 +38,11 @@ test('core ESM examples pair, connect, publish and shut down', { timeout: 15_000
   assert.deepEqual(f.rpcs.find(rpc => rpc.method === 'group_chat.send_message').params, {
     sessionId: frame.sessionId, toolCallId: frame.deliveryId, content: 'Received',
   });
+  await until(() => f.rpcs.some(rpc => rpc.method === 'thread.activity'), 'example idle');
+  assert.deepEqual(f.rpcs.find(rpc => rpc.method === 'thread.activity').params, {
+    sessionId: frame.sessionId, state: 'idle', deliveryId: frame.deliveryId,
+  });
+  assert.ok(stdout.includes('Hello example'));
   child.kill('SIGTERM');
   assert.deepEqual(await exited, { code: 0, signal: null }, stderr);
 });

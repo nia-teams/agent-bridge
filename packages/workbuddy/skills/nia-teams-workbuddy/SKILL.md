@@ -25,10 +25,12 @@ Connect local WorkBuddy (CodeBuddy) into Nia Teams as an Agent that communicates
 - Optional `--log-file <path>` overrides the default `<config-dir>/daemon.log`; read the printed log file, check the printed PID with OS process tools, and verify connected/idle presence and a GroupChat reply in Nia Teams.
 - Discovery finds `WorkBuddy.app`'s bundled `codebuddy-lite-wb.mjs` or standalone `codebuddy` on PATH (unwrapping Windows npm `.cmd` shims). If using a custom wrapper, pass the actual `.js`, `.mjs`, `.cjs`, or `.exe` entrypoint via `--codebuddy-bin` or `CODEBUDDY_BIN`; never enable shell execution for user prompts.
 
+- Invite-code onboarding: `nia-workbuddy connect --invite-code <code> --user-name <user> --agent-name <agent>`; names are required for first registration. Reuse same-server credentials. `connect` starts the daemon; use `--no-start` when it is already running.
+
 ## GroupChat Replies & Mentions
 
-- Completed replies publish at turn end unless `nia_group_chat_send_message` already sent a message during that turn.
-- Use `nia_group_chat_send_message` for mid-turn progress and `nia_group_chat_history` for earlier context; `AskUserQuestion` waits for the invoking human in GroupChat.
+- Every reply requires explicit `send_message`; turn-end text remains private.
+- Use `send_message` for mid-turn progress and `chat_history` for earlier context; `AskUserQuestion` waits for the invoking human in GroupChat.
 - Read sender/member IDs from incoming headers (`messages[].authorId` in raw payloads) and format mentions as `<mention userId="<24-hex-id>" />` instead of plain `@Name`.
 
 ## Trust & Approvals

@@ -8,6 +8,7 @@ import { WebSocketServer } from 'ws';
 import { createWorkloadOidcProvider, generateTestRsaKeyPair, signTestConfirmationToken } from '@nia-teams/mcp-sdk/testing';
 import { stableExternalAgentThreadId, saveCredentials } from '../dist/index.js';
 
+export const contract = { systemPrompt: 'Server collaboration policy: publish replies using send_message. Silent turns receive server reminders.', tools: [{ name: 'send_message', description: 'Server send description', inputSchema: { type: 'object', properties: { content: { type: 'string' } }, required: ['content'] } }, { name: 'chat_history', description: 'Server history description', inputSchema: { type: 'object', properties: { limit: { type: 'integer' }, offset: { type: 'integer' } } } }] };
 export const teamId = '0123456789abcdef01234567';
 export const sessionId = '123456789abcdef012345678';
 export const groupChatId = '23456789abcdef0123456789';
@@ -22,7 +23,7 @@ export async function until(predicate, label = 'condition', timeout = 4000) {
 }
 export function message(content = 'Hello', deliveryId = randomUUID()) {
   const id = randomUUID();
-  return { type: 'thread.message', protocolVersion: 1, deliveryId, groupChatId, sessionId, agentThreadId, reason: 'message',
+  return { type: 'thread.message', protocolVersion: 2, deliveryId, groupChatId, sessionId, agentThreadId, reason: 'message',
     groupChat: { title: 'Project chat', url: 'https://nia-teams.com/chat/example', members: [{ kind: 'human', id: userId, name: 'Alex' }] },
     invokedBy: { userId, userName: 'Alex' }, triggerMessageId: id,
     messages: [{ id, kind: 'human', authorId: userId, authorName: 'Alex', content, createdAt: new Date().toISOString() }],
@@ -99,7 +100,7 @@ export async function fixture(t) {
     const token = await signTestConfirmationToken(fixture.provider, { server: 'agent-bridge', tool: card.params.verifyToolName,
       arguments: tamper ? { ...card.params.verifyArguments, altered: true } : card.params.verifyArguments, cardId: card.params.cardId, claims,
     });
-    fixture.send({ type: 'card.action', protocolVersion: 1, deliveryId: randomUUID(), sessionId: card.params.sessionId, groupChatId, agentThreadId,
+    fixture.send({ type: 'card.action', protocolVersion: 2, deliveryId: randomUUID(), sessionId: card.params.sessionId, groupChatId, agentThreadId,
       cardId: card.params.cardId, decision, clickedBy: { userId, name: 'Alex', teamRole: 'member' }, _meta: { 'nia/confirmationToken': tokenTransform ? tokenTransform(token) : token } });
   };
   wss.on('connection', ws => {
@@ -108,10 +109,10 @@ export async function fixture(t) {
     ws.on('message', async bytes => {
       const frame = JSON.parse(bytes.toString()); fixture.frames.push(frame);
       if (frame.type === 'hello') {
-        assert.equal(frame.protocolVersion, 1); assert.equal(frame.teamId, teamId); assert.ok(leases.delete(frame.lease));
+        assert.equal(frame.protocolVersion, 2); assert.equal(frame.teamId, teamId); assert.ok(leases.delete(frame.lease));
         fixture.socket = ws;
         const ready = () => {
-          ws.send(JSON.stringify({ type: 'ready', protocolVersion: 1, connectionGeneration: randomUUID(), agent: { teamId, slug: 'helper', name: 'Helper' }, issuer: fixture.url }));
+          ws.send(JSON.stringify({ type: 'ready', ...contract, protocolVersion: 2, connectionGeneration: randomUUID(), agent: { teamId, slug: 'helper', name: 'Helper' }, issuer: fixture.url }));
           fixture.onReady?.(ws);
         };
         if (fixture.holdReady) fixture.waitingReady = ready; else ready();
@@ -120,9 +121,9 @@ export async function fixture(t) {
         if (fixture.handleRpc?.(frame, ws)) return;
         if (fixture.holdRpc.has(frame.method)) return;
         const result = frame.method === 'group_chat.history' ? { text: 'Earlier chat' } : frame.method === 'card.upsert' ? { cardId: frame.params.cardId, status: 'pending' } : { ok: true, published: true };
-        ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 1, requestId: frame.requestId, ok: true, result }));
+        ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 2, requestId: frame.requestId, ok: true, result }));
         fixture.onRpc?.(frame);
-      } else if (frame.type === 'heartbeat') ws.send(JSON.stringify({ type: 'heartbeat', protocolVersion: 1, at: Date.now() }));
+      } else if (frame.type === 'heartbeat') ws.send(JSON.stringify({ type: 'heartbeat', protocolVersion: 2, at: Date.now() }));
     });
   });
   t.after(async () => {

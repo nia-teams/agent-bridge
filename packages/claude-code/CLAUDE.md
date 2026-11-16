@@ -1,5 +1,8 @@
 # Maintainer context
 
+- Load collaboration policy and tool definitions from `ready.systemPrompt` / `ready.tools`; preserve server prompts with `resolveThreadPrompt(frame)`.
+- Publish replies explicitly; turn-end text stays local. Report idle with the processed `deliveryId`; silent-turn reminders come from server `thread.message` prompts.
+
 ## Installation contract
 
 ```sh
@@ -14,7 +17,7 @@ npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
 
 ## Layering
 
-- Node.js 20+ ESM / NodeNext; `types.ts` is the host-independent Agent Bridge v1 wire contract.
+- Node.js 20+ ESM / NodeNext; `types.ts` is the host-independent Agent Bridge v2 wire contract.
 - `crypto.ts`, `http.ts`, `credentials.ts`, and `pairing.ts` own Ed25519 identity.
 - `bridge-client.ts` owns authenticated WebSocket, RPC, dedup, and OIDC verification.
 - `publications.ts` owns bounded FIFO retries with stable session/tool-call keys.

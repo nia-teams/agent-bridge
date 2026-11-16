@@ -10,7 +10,13 @@ npm install @nia-teams/agent-bridge-core
 
 AI guide: [skills/agent-bridge-core/SKILL.md](./skills/agent-bridge-core/SKILL.md) · `node_modules/@nia-teams/agent-bridge-core/skills/agent-bridge-core/SKILL.md`.
 
+For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+
 ## Core Concepts
+
+`BridgeClient` connects over WebSocket with `protocolVersion: 2`. Its `getContract()` method returns collaboration instructions from `ready.systemPrompt` and tool definitions (`name`, `description`, `inputSchema`) from `ready.tools`. Use `resolveThreadPrompt(frame)` for incoming prompts.
+
+A `TurnRunner` returns `void`, publishes through `context.send`, and reads history through `context.history`. `SessionHost` does not publish return text.
 
 `pairHost` saves host Ed25519 credentials; `BridgeClient` opens a challenge/lease-authenticated WebSocket; adapters run GroupChat turns; `PublicationQueue` publishes replies. Consumer runtimes own models, tools, and local permissions.
 
@@ -62,17 +68,23 @@ Open the printed URL in a browser to create or rebind an external Agent. Later c
 ### 2. Receive and reply to GroupChat messages
 
 ```js
-import { BridgeClient, defaultConfigDir, loadCredentials } from '@nia-teams/agent-bridge-core';
+import { BridgeClient, defaultConfigDir, loadCredentials, resolveThreadPrompt } from '@nia-teams/agent-bridge-core';
 
 const configDir = defaultConfigDir('my-agent', 'MY_AGENT_CONFIG_DIR');
 const bridge = new BridgeClient(await loadCredentials(configDir), {
   onError: error => console.error(error.message),
 });
 bridge.onThreadMessage(async frame => {
+  console.log(resolveThreadPrompt(frame));
   await bridge.rpc('group_chat.send_message', {
     sessionId: frame.sessionId,
     toolCallId: frame.deliveryId,
     content: 'Received',
+  });
+  await bridge.rpc('thread.activity', {
+    sessionId: frame.sessionId,
+    state: 'idle',
+    deliveryId: frame.deliveryId,
   });
 });
 bridge.onThreadCancel(() => {});
@@ -82,6 +94,8 @@ process.once('SIGINT', () => bridge.close());
 process.once('SIGTERM', () => bridge.close());
 await bridge.start();
 ```
+
+For a model-backed runtime, pass `resolveThreadPrompt(frame)` and `bridge.getContract()` to the model. Publish replies through `group_chat.send_message` and report turn completion through `thread.activity` with `state: 'idle'` and the processed `deliveryId`.
 
 Run the packaged examples:
 
@@ -111,7 +125,7 @@ The root entry also exports runtime services:
 | --- | --- |
 | `SessionHost` | GroupChat queues, session resume, cancellation, questions, and approval cards |
 | `runSessionDaemon` | Assemble BridgeClient and SessionHost with signal-driven shutdown |
-| `consumeSdkQuery` | Consume SDK events and extract final replies |
+| `consumeSdkQuery` | Consume SDK events and synchronize sessions and activity without publishing text |
 | `ThreadMapStore` | Persist per-GroupChat consumer runtime session IDs |
 | `IdleSleepGuard` | Prevent system sleep with `caffeinate` while tasks run on macOS |
 

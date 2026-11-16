@@ -32,7 +32,7 @@ const activity = f => f.rpcs.filter(r => r.method === 'thread.activity');
 test('MCP capabilities, instructions, snake_case channel metadata and rich message formatting', async t => {
   const { f, client, events } = await setup(t, false);
   assert.deepEqual(client.getServerCapabilities().experimental, { 'claude/channel': {}, 'claude/channel/permission': {} });
-  assert.match(client.getInstructions(), /MUST call nia_group_chat_send_message/);
+  assert.match(client.getInstructions(), /MUST call send_message/);
   assert.equal((await client.listTools()).tools.length, 2);
   const frame = message('Inspect the attachment'); frame.reason = 'joined'; frame.groupChat.members[0].orgName = 'Acme';
   frame.messages[0].replyToMessageId = 'prior'; frame.messages[0].attachments = [{ name: 'log.txt', url: 'https://example.com/log.txt', mimeType: 'text/plain', size: 12, transcript: 'transcript' }];
@@ -46,21 +46,21 @@ test('MCP capabilities, instructions, snake_case channel metadata and rich messa
 test('reply queue replays after transient disconnect, keep_working and final idle; history validates pagination', async t => {
   const { f, client } = await setup(t);
   const args = { group_chat_id: groupChatId, content: 'Progress', keep_working: true };
-  assert.ok(!(await client.callTool({ name: 'nia_group_chat_send_message', arguments: args })).isError);
+  assert.ok(!(await client.callTool({ name: 'send_message', arguments: args })).isError);
   assert.equal(activity(f).at(-1).params.state, 'executing');
   let lost = false;
   f.handleRpc = (rpc, ws) => { if (rpc.method === 'group_chat.send_message' && !lost) { lost = true; ws.terminate(); return true; } return false; };
-  const response = await client.callTool({ name: 'nia_group_chat_send_message', arguments: { group_chat_id: groupChatId, content: 'Final' } });
+  const response = await client.callTool({ name: 'send_message', arguments: { group_chat_id: groupChatId, content: 'Final' } });
   assert.ok(!response.isError); assert.equal(activity(f).at(-1).params.state, 'idle');
   const attempts = f.rpcs.filter(r => r.method === 'group_chat.send_message' && r.params.content === 'Final');
   assert.equal(attempts.length, 2); assert.equal(attempts[0].params.toolCallId, attempts[1].params.toolCallId);
-  const history = await client.callTool({ name: 'nia_group_chat_history', arguments: { group_chat_id: groupChatId } });
+  const history = await client.callTool({ name: 'chat_history', arguments: { group_chat_id: groupChatId } });
   assert.equal(history.content[0].text, 'Earlier chat');
   assert.deepEqual(f.rpcs.find(r => r.method === 'group_chat.history').params, { sessionId, limit: 50, offset: 0 });
   for (const args of [{ group_chat_id: groupChatId, limit: 101 }, { group_chat_id: groupChatId, offset: -1 }, { group_chat_id: 'bad' }]) {
-    assert.equal((await client.callTool({ name: 'nia_group_chat_history', arguments: args })).isError, true);
+    assert.equal((await client.callTool({ name: 'chat_history', arguments: args })).isError, true);
   }
-  assert.equal((await client.callTool({ name: 'nia_group_chat_send_message', arguments: { group_chat_id: groupChatId, content: ' ' } })).isError, true);
+  assert.equal((await client.callTool({ name: 'send_message', arguments: { group_chat_id: groupChatId, content: ' ' } })).isError, true);
 });
 
 test('RS256 approval is bound to exact tool arguments and card, emits allow once', async t => {
@@ -79,7 +79,7 @@ for (const scenario of ['tampered', 'missing', 'canceled', 'invalid-signature', 
   test(`permission ${scenario} fails closed`, async t => {
     const ctx = await setup(t); const card = await permission(ctx);
     if (scenario === 'missing') {
-      ctx.f.send({ type: 'card.action', protocolVersion: 1, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, cardId: card.params.cardId, decision: 'approved', clickedBy: { userId, name: 'Alex' } });
+      ctx.f.send({ type: 'card.action', protocolVersion: 2, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, cardId: card.params.cardId, decision: 'approved', clickedBy: { userId, name: 'Alex' } });
     } else if (scenario === 'wrong-card') {
       await ctx.f.confirm({ params: { ...card.params, cardId: card.params.cardId + '-other' } });
       // Unknown card is ignored, not a decision on the original pending request.
@@ -100,9 +100,9 @@ test('permission without GroupChat context stays local; routing prefers latest e
   ctx.f.send(message()); await until(() => ctx.events.length === 1);
   const other = message('Other chat'); other.groupChatId = 'aaaaaaaaaaaaaaaaaaaaaaaa'; other.sessionId = 'bbbbbbbbbbbbbbbbbbbbbbbb'; other.agentThreadId = stableExternalAgentThreadId(other.groupChatId, teamId);
   ctx.f.send(other); await until(() => ctx.events.length === 2);
-  await ctx.client.callTool({ name: 'nia_group_chat_send_message', arguments: { group_chat_id: other.groupChatId, content: 'Done' } });
+  await ctx.client.callTool({ name: 'send_message', arguments: { group_chat_id: other.groupChatId, content: 'Done' } });
   const card = await permission(ctx); assert.equal(card.params.sessionId, sessionId, 'latest executing wins over most recently triggered idle chat');
-  ctx.f.send({ type: 'card.action', protocolVersion: 1, deliveryId: randomUUID(), groupChatId: other.groupChatId, sessionId: other.sessionId, agentThreadId: other.agentThreadId, cardId: card.params.cardId, decision: 'canceled', clickedBy: { userId, name: 'Alex' } });
+  ctx.f.send({ type: 'card.action', protocolVersion: 2, deliveryId: randomUUID(), groupChatId: other.groupChatId, sessionId: other.sessionId, agentThreadId: other.agentThreadId, cardId: card.params.cardId, decision: 'canceled', clickedBy: { userId, name: 'Alex' } });
   await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(ctx.verdicts.length, 0);
   await ctx.f.confirm(card); await until(() => ctx.verdicts.length === 1);
   assert.equal(ctx.verdicts[0].behavior, 'allow');
@@ -111,12 +111,12 @@ test('permission without GroupChat context stays local; routing prefers latest e
 for (const reason of ['user_aborted', 'removed_from_group']) {
   test(`thread.cancel ${reason} cancels card and idles; shutdown is idempotent`, async t => {
     const ctx = await setup(t); const card = await permission(ctx);
-    ctx.f.send({ type: 'thread.cancel', protocolVersion: 1, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, reason });
+    ctx.f.send({ type: 'thread.cancel', protocolVersion: 2, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, reason });
     await until(() => ctx.f.rpcs.some(r => r.method === 'card.cancel'));
     await until(() => activity(ctx.f).at(-1).params.state === 'idle');
     assert.equal(ctx.verdicts[0].behavior, 'deny');
     if (reason === 'user_aborted') { await until(() => ctx.events.length === 2); assert.equal(ctx.events[1].meta.reason, reason); }
-    else assert.equal((await ctx.client.callTool({ name: 'nia_group_chat_history', arguments: { group_chat_id: groupChatId } })).isError, true);
+    else assert.equal((await ctx.client.callTool({ name: 'chat_history', arguments: { group_chat_id: groupChatId } })).isError, true);
     await ctx.f.confirm(card); await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(ctx.verdicts.length, 1);
     assert.equal(ctx.server.close(), ctx.server.close());
   });
@@ -137,9 +137,9 @@ test('session rotation denies old cards and stale cancel cannot affect new conte
   assert.equal(ctx.verdicts[0].behavior, 'deny');
   assert.ok(ctx.f.rpcs.some(r => r.method === 'card.cancel' && r.params.sessionId === sessionId));
   const before = activity(ctx.f).length;
-  ctx.f.send({ type: 'thread.cancel', protocolVersion: 1, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, reason: 'removed_from_group' });
+  ctx.f.send({ type: 'thread.cancel', protocolVersion: 2, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, reason: 'removed_from_group' });
   await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(activity(ctx.f).length, before);
-  await ctx.client.callTool({ name: 'nia_group_chat_history', arguments: { group_chat_id: groupChatId } });
+  await ctx.client.callTool({ name: 'chat_history', arguments: { group_chat_id: groupChatId } });
   assert.equal(ctx.f.rpcs.filter(r => r.method === 'group_chat.history').at(-1).params.sessionId, next.sessionId);
   await ctx.f.confirm(card); await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(ctx.verdicts.length, 1);
 });
@@ -150,7 +150,7 @@ test('cancel wins while approval signature verification is in flight', async t =
   let release; let verifying = false;
   ctx.server.bridge.verifyCardApproval = async (...args) => { await original(...args); verifying = true; await new Promise(resolve => { release = resolve; }); };
   await ctx.f.confirm(card); await until(() => verifying);
-  ctx.f.send({ type: 'thread.cancel', protocolVersion: 1, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, reason: 'user_aborted' });
+  ctx.f.send({ type: 'thread.cancel', protocolVersion: 2, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, reason: 'user_aborted' });
   await until(() => ctx.verdicts.length === 1); assert.equal(ctx.verdicts[0].behavior, 'deny');
   release(); await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(ctx.verdicts.length, 1);
 });
@@ -159,6 +159,19 @@ test('signed token for another card fails exact card binding', async t => {
   const { signTestConfirmationToken } = await import('@nia-teams/mcp-sdk/testing');
   const ctx = await setup(t); const card = await permission(ctx);
   const token = await signTestConfirmationToken(ctx.f.provider, { server: 'agent-bridge', tool: 'claude_code.permission', arguments: card.params.verifyArguments, cardId: card.params.cardId + '-wrong' });
-  ctx.f.send({ type: 'card.action', protocolVersion: 1, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, cardId: card.params.cardId, decision: 'approved', clickedBy: { userId, name: 'Alex' }, _meta: { 'nia/confirmationToken': token } });
+  ctx.f.send({ type: 'card.action', protocolVersion: 2, deliveryId: randomUUID(), groupChatId, sessionId, agentThreadId, cardId: card.params.cardId, decision: 'approved', clickedBy: { userId, name: 'Alex' }, _meta: { 'nia/confirmationToken': token } });
   await until(() => ctx.verdicts.length === 1); assert.equal(ctx.verdicts[0].behavior, 'deny');
+});
+
+test('channel uses server policy/tools and forwards reminder prompts with delivery-scoped final idle', async t => {
+  const { f, client, events } = await setup(t, false);
+  assert.ok(client.getInstructions().includes('Server collaboration policy'));
+  const tools = (await client.listTools()).tools;
+  assert.ok(tools.find(t => t.name === 'send_message').description.includes('Server send description'));
+  const frame = { ...message(), prompt: '<system-reminder>Reply in this chat.</system-reminder>' };
+  f.send(frame); await until(() => events.length === 1);
+  assert.equal(events[0].content, frame.prompt);
+  const sent = await client.callTool({ name: 'send_message', arguments: { group_chat_id: groupChatId, content: 'Public reply' } });
+  assert.equal(sent.content[0].text, '消息已发布到聊天');
+  assert.equal(activity(f).at(-1).params.deliveryId, frame.deliveryId);
 });

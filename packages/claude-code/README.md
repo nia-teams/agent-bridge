@@ -22,6 +22,8 @@ AI coding agents: load [`./skills/nia-teams-claude-code/SKILL.md`](./skills/nia-
 
 [中文](./README_CN.md) · [Wire specification](./docs/SPECIFICATION.md) · [Maintainer guidance](./AGENTS.md)
 
+For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+
 ## Product overview
 
 [Nia Teams](https://nia-teams.com) provides shared GroupChats where people and Agents collaborate. The chat timeline contains published replies; the live activity strip shows executing, waiting, or idle state. TaskBar cards beside the composer collect explicit human approval for a particular tool call. Pairing associates one host key with an external Agent identity; the model and tools continue running on your own computer or server.
@@ -36,7 +38,7 @@ AI coding agents: load [`./skills/nia-teams-claude-code/SKILL.md`](./skills/nia-
 | `@nia-teams/claude-code-plugin` | Authenticated bridge, Channel notifications, reply/history tools, activity leases, verified permission relay |
 | Nia Teams | GroupChat membership, external Agent binding, TaskBar UI, approval authorization and signed confirmation |
 
-`nia-claude start` uses `@anthropic-ai/claude-agent-sdk` to invoke the local Claude CLI, persist a session per GroupChat, and display tool permission requests as TaskBar confirmation cards. In interactive Channel mode, MCP supplies stdio transport and tool discovery. `claude/channel` supplies inbound host events; `claude/channel/permission` supplies permission relay. Agent Bridge v1 supplies authenticated Nia Teams messaging and cards. Channel mode delegates model execution to the interactive host; daemon mode invokes the local Claude CLI through the SDK. Neither opens a public HTTP listener; execution follows the selected permission mode.
+`nia-claude start` uses `@anthropic-ai/claude-agent-sdk` to invoke the local Claude CLI, persist a session per GroupChat, and display tool permission requests as TaskBar confirmation cards. In interactive Channel mode, MCP supplies stdio transport and tool discovery. `claude/channel` supplies inbound host events; `claude/channel/permission` supplies permission relay. Agent Bridge supplies authenticated Nia Teams messaging and cards. Channel mode delegates model execution to the interactive host; daemon mode invokes the local Claude CLI through the SDK. Neither opens a public HTTP listener; execution follows the selected permission mode.
 
 ## Quickstart
 
@@ -111,7 +113,7 @@ pgrep -af '[n]ia-claude.*start'
 
 - Per-GroupChat Claude Code session IDs live in private `threads.json` beside credentials. Later turns and process restarts resume that GroupChat’s session. Chats share the project selected by `--cwd`.
 - The SDK sets `strictMcpConfig: true`, adding `--strict-mcp-config` and using only supplied GroupChat MCP servers. User, project, and local settings still supply permission rules and hooks.
-- `nia_group_chat_send_message` and `nia_group_chat_history` run in the current GroupChat scope. Final replies publish at turn completion; a successful explicit send suppresses that turn’s final text publication.
+- `send_message` and `chat_history` run in the current GroupChat scope. All public replies require explicit `send_message`; turn completion only reports idle.
 - Tool requests forwarded to `canUseTool` create TaskBar cards; `AskUserQuestion` posts questions and waits for the invoker’s GroupChat response. Existing allow rules remain effective; `--full-auto` selects Claude Code `bypassPermissions` and skips bridge confirmation.
 - Use one `start` or `mcp` connection per credentials. On macOS, `caffeinate` prevents system sleep while a task runs; SIGINT/SIGTERM abort the SDK query and clean up cards and transport.
 
@@ -145,7 +147,13 @@ Compatibility is protocol-based; verify your host version's supported flags and 
 
 Open Nia Teams **Messages**. Start a chat using the external Agent shortcut, or open an existing GroupChat and use the member **+** control to invite it. Organization members can invite an organization-affiliated Agent; a personal assistant is initially invited by its creator. Once invited, GroupChat members can `@` it to send tasks. Keep the host session running and confirm its live status is connected.
 
-Incoming headers contain the title, URL, member IDs, sender, messages, attachments, and transcripts. Daemon mode publishes final replies at turn completion; the following send contract applies to interactive Channel mode. Terminal output remains private: Claude must call `nia_group_chat_send_message` with the received `group_chat_id` for every reply. Interim updates use `keep_working: true`; final replies omit it to mark idle. Mentions use `<mention userId="24-hex-id" />`, not plain `@Name`.
+Incoming headers contain the title, URL, member IDs, sender, messages, attachments, and transcripts. Daemon replies require explicit `send_message`; Channel mode adds the routing parameters below. Terminal output remains private: Claude must call `send_message` with the received `group_chat_id` for every reply. Interim updates use `keep_working: true`; final replies omit it to mark idle. Mentions use `<mention userId="24-hex-id" />`, not plain `@Name`.
+
+GroupChat tools:
+
+- `send_message({ content })` posts replies or progress to the current GroupChat; terminal text stays on the host.
+- `chat_history({ limit?, offset? })` paginates GroupChat history.
+- In Channel mode, both tools also require the notification’s `group_chat_id`; progress messages use `keep_working: true`.
 
 ### Step 5: TaskBar tool approval
 

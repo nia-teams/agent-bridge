@@ -31,7 +31,7 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
         setup(build) {
           const modules = {
             '@tencent-ai/agent-sdk': `export const query = input => input; export const tool = () => ({}); export const createSdkMcpServer = () => ({ instance: { close: async () => {} } });`,
-            '@nia-teams/agent-bridge-core': `export const findExecutable = async (_, explicit) => explicit; export const consumeSdkQuery = input => input; export const GROUP_CHAT_INSTRUCTIONS = '';`,
+            '@nia-teams/agent-bridge-core': `export const findExecutable = async (_, explicit) => explicit; export const consumeSdkQuery = input => input; export const findTool = (tools, name) => tools.find(t => t.name === name);`,
             'node:os': `export const homedir = () => ${JSON.stringify(home)}; export const platform = () => ${JSON.stringify(platformName)};`,
           };
           build.onResolve({ filter: /^(@tencent-ai\/agent-sdk|@nia-teams\/agent-bridge-core|node:os)$/ }, args => ({ path: args.path, namespace: 'mock' }));
@@ -46,7 +46,7 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
   const defaultDir = join(home, '.workbuddy');
   async function invoke(binary = appBinary, signal = new AbortController().signal) {
     return createWorkBuddyRunner({ cwd: home, codebuddyBin: binary })({
-      prompt: 'hello', signal,
+      prompt: 'hello', signal, systemPrompt: 'server', tools: [{ name: 'send_message', description: 'send' }, { name: 'chat_history', description: 'history' }],
       send: async () => {}, history: async () => [], permission: async () => ({ behavior: 'allow' }),
     });
   }
@@ -144,7 +144,7 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, 'login.info'), JSON.stringify({ auth: { accessToken: platformName + '-token' } }));
       const runner = await loadRunner(platformName);
-      const result = await runner({ cwd: home, codebuddyBin: appBinary })({ prompt: 'hi', signal: new AbortController().signal });
+      const result = await runner({ cwd: home, codebuddyBin: appBinary })({ systemPrompt: 'Server GroupChat policy', tools: [{ name: 'send_message', description: 'send' }, { name: 'chat_history', description: 'history' }], prompt: 'hi', signal: new AbortController().signal });
       assert.equal(result.options.env.CODEBUDDY_AUTH_TOKEN, platformName + '-token');
     }
     delete process.env.LOCALAPPDATA;
@@ -299,6 +299,7 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
   const invoke = async (selected, extra = {}, overrides = {}) => {
     const sessions = [], sends = [], permissions = [];
     const result = await createWorkBuddyRunner({ cwd: root, codebuddyBin: selected, ...extra })({
+      systemPrompt: 'Server GroupChat policy', tools: [{ name: 'send_message', description: 'send' }, { name: 'chat_history', description: 'history' }],
       prompt: 'hello', signal: new AbortController().signal,
       session: async id => { sessions.push(id); }, activity: async () => {},
       send: async text => { sends.push(text); }, history: async () => [{ content: 'older message' }],
@@ -310,7 +311,7 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
   await t.test('desktop wrapper selects readable ESM, preserves parent env and adds desktop config', async () => {
     assert.equal(await resolveCodeBuddyBinary(binary), lite);
     const turn = await invoke(binary);
-    assert.deepEqual(turn.result, { text: 'SDK final reply' });
+    assert.equal(turn.result, undefined);
     assert.ok(turn.sessions[0]);
     assert.equal(turn.spawn.entry, lite);
     assert.equal(turn.spawn.cwd, root);
@@ -388,7 +389,7 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
     assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
     await writeFile(lite, fixture);
     host.message(message('try again'));
-    await until(() => f.rpcs.some(r => r.method === 'group_chat.send_message'), 'desktop recovery final');
-    assert.equal(f.rpcs.find(r => r.method === 'group_chat.send_message').params.content, 'SDK final reply');
+    await until(() => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle').length === 2, 'desktop recovery idle');
+    assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
   });
 });

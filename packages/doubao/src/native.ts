@@ -57,7 +57,7 @@ export async function runNativeDoubao(binary: string, options: { cwd: string; mo
   context.signal.throwIfAborted();
   const result = await new Promise<{ text: string; sessionId?: string; code: number | null; stderr: string }>((resolveTurn, reject) => {
     const args = ['-C', options.cwd, '--permission-mode', options.fullAuto ? 'always_allow' : 'ask_always',
-      ...(options.model ? ['--model', options.model] : []), ...(resume ? ['--resume', resume] : []), '-p', context.prompt];
+      ...(options.model ? ['--model', options.model] : []), ...(resume ? ['--resume', resume] : []), '-p', (resume ? context.prompt : `${context.systemPrompt}\n\n${context.prompt}`)];
     const command = executableCommand(binary, args);
     const child = spawn(command.file, command.args, { ...command.options, cwd: options.cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     let text = '', stderr = '', sessionId: string | undefined, overflow = false;
@@ -98,5 +98,6 @@ export async function runNativeDoubao(binary: string, options: { cwd: string; mo
   if (result.code !== 0) throw new Error(`Doubao CLI failed (${result.code}): ${result.stderr.trim() || 'No diagnostic output'}`);
   if (!result.sessionId) throw new Error('Doubao CLI did not emit a session marker; refusing an unresumable successful turn');
   await context.session(`cli:${result.sessionId}`);
-  return { text: result.text || undefined };
+  if (result.text?.trim()) await context.send(result.text);
+  return;
 }

@@ -3,7 +3,10 @@
 Repository context for AI coding agents maintaining `@nia-teams/dsh-plugin`.
 
 - Configuring or embedding this package in a DeepSeek Harness host: read `skills/nia-teams-dsh/SKILL.md`.
-- Wire-level Agent Bridge v1 HTTP/WebSocket frames, Ed25519 challenge signatures, and `nia/confirmationToken` claims: read `docs/SPECIFICATION.md`.
+- Wire-level Agent Bridge v2 HTTP/WebSocket frames, Ed25519 challenge signatures, and `nia/confirmationToken` claims: read `docs/SPECIFICATION.md`.
+
+- Load collaboration policy and tool definitions from `ready.systemPrompt` / `ready.tools`; preserve server prompts with `resolveThreadPrompt(frame)`.
+- Publish replies explicitly; turn-end text stays local. Report idle with the processed `deliveryId`; silent-turn reminders come from server `thread.message` prompts.
 
 ## Scope & Layering
 
@@ -31,11 +34,11 @@ workspace execution, and session persistence remain host responsibilities.
   Missing/tampered tokens fail closed. Ordinary approvals return `'allowed-once'`,
   never mutating `sessionAllowTools`; that list is explicit operator preauthorization.
 - **Ownership & session isolation**: Use `stableExternalAgentThreadId(groupChatId, teamId)`.
-  `nia_group_chat_send_message` and `nia_group_chat_history` enforce `ownsAgent(agent)`
+  `send_message` and `chat_history` enforce `ownsAgent(agent)`
   (root + `isOwnedBy` descendants) at both presentation and execution. Child-agent
   final text stays private to the parent. Preserve Nia session IDs on publication retries.
 - **Contract sync & verification**: Changes to CLI flags, `Config`, exported APIs, or
-  Agent Bridge v1 frames update `docs/SPECIFICATION.md`, `skills/nia-teams-dsh/SKILL.md`,
+  Agent Bridge v2 frames update `docs/SPECIFICATION.md`, `skills/nia-teams-dsh/SKILL.md`,
   `README.md`, and `README_CN.md` together. Run `npm run typecheck`, `npm run build`,
   `npm test`, and check `npm pack --dry-run` against `package.json` `files`.
 

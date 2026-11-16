@@ -12,6 +12,8 @@ nia-agy start --cwd "." --daemon
 
 AI 编程助手请加载 [skills/nia-teams-agy/SKILL.md](./skills/nia-teams-agy/SKILL.md)；安装后路径为 `node_modules/@nia-teams/agy-bridge/skills/nia-teams-agy/SKILL.md`。
 
+邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
+
 ## 一、产品背景与协作模型
 
 本包通过 `agy acp` 的 JSON-RPC 2.0 标准输入输出驱动 Google Antigravity CLI。一个桥接进程复用一个 ACP 子进程，为每个群聊创建或恢复独立会话；团队在群聊中发送任务、查看活动状态，并通过 TaskBar 确认工具执行。
@@ -64,7 +66,6 @@ nia-agy pair --name 'My Antigravity'
 
 ```text
 Pairing code: A7F39C2B
-Open this URL to create or bind your external Agent:
 https://nia-teams.com/bridge/agent-pair/A7F39C2B
 ```
 
@@ -116,7 +117,7 @@ pgrep -af '[n]ia-agy.*start'
 
 创建会话时附加群聊协作指令，随后按需调用 `session/set_mode` 与 `session/set_model`，最后发送 `session/prompt`。模型由 agy 返回的可用模型决定，模式可选 `default`、`accept-edits`、`auto`、`plan`。新会话和恢复会话都会应用显式模式与模型。
 
-`session/update` 的 `agent_message_chunk` 文本按收到的顺序拼接；thought 更新仅展示思考状态，`tool_call` / `tool_call_update` 展示正在运行的工具。`session/prompt` 返回 `stopReason: end_turn` 后发布最终回复；取消、错误和未完成状态不发布已积累的片段。
+流式输出留在本机，思考与工具更新同步活动状态；群聊回复通过 `send_message` 发布。
 
 同一群聊的轮次由 SessionHost 串行执行，不同群聊可在同一个 ACP 子进程中并发。客户端按 JSON-RPC ID 匹配响应，按 `params.sessionId` 路由流式更新和权限请求；服务端请求 ID 即使与客户端请求相同，也不会混淆为响应。
 
@@ -126,14 +127,14 @@ pgrep -af '[n]ia-agy.*start'
 
 点击配对成功页的 **前往群聊**，或打开 [Nia Teams](https://nia-teams.com) 进入左侧 **消息** 页：
 
-- **直接发起新对话**：在消息列表顶部的 Agent 快捷栏点击刚创建的外部 Agent 头像发起对话（Agent 较多时可点快捷栏右侧下箭头展开），或点击快捷栏最右侧的 **`+`**（新建聊天）创建多人群聊。
+- **发起新对话**：在消息列表顶部的 Agent 快捷栏点击刚创建的外部 Agent 头像发起对话（Agent 较多时可点快捷栏右侧下箭头展开），或点击快捷栏最右侧的 **`+`**（新建聊天）创建多人群聊。
 - **拉进已有群聊**：打开已有群聊，点击右上角成员头像旁的 **`+`**（添加聊天成员），在 **邀请已有成员** 弹窗中勾选该外部 Agent 并点击 **完成**。同一组织成员可将组织归属的 Agent 拉入群；「个人助理」仅创建者可拉入群，加入后群内其他成员也可 `@` 它。
 
 进入群聊后，查看底部输入框上方的状态栏：当该外部 Agent 的状态从红色的 **`未连接`** 变为 **`空闲待命`**，说明 Google Antigravity 桥接进程已经连通就绪。
 
 ### 第 5 步：在群聊中 `@` 它协作与日常管理
 
-在输入框输入 `@` 选中该外部 Agent 并发送任务。执行时状态栏显示 `Thinking…` 或正在运行的工具，轮次结束后，最终回复会发回群聊。后续日常管理按权限分为三类：
+在输入框输入 `@` 选中该外部 Agent 并发送任务。执行时状态栏显示 `Thinking…` 或正在运行的工具，回复发回群聊。后续日常管理按权限分为三类：
 
 - **临时离线（主机侧操作）**：以前台方式运行时，在主机终端按 `Ctrl+C` 停止 `nia-agy start`；后台运行时，对启动时记录的 PID 发送 SIGTERM。群内状态会变为 `未连接`，重新运行 `nia-agy start --cwd /path/to/workspace` 即可恢复连接。
 - **更换主机或解绑主机（需该 Agent 的 `owner` 或 `admin`）**：迁移到新主机时，在新主机执行 `nia-agy pair`，在浏览器配对页切换到 **重绑已有外部 Agent**，选中目标后点击 **确认重新绑定**。若仅需解绑，在它的对话页或共同所在的群聊右上角打开应用菜单（网格图标 **Apps**）→ **Agent 设置**，点击 **解绑主机**。重绑或解绑会递增 `keyGeneration` 使旧主机凭证失效，并以关闭码 `4401` 断开旧连接。
@@ -145,7 +146,7 @@ pgrep -af '[n]ia-agy.*start'
 - **`nia-agy status` 报错或绑定不是目标 Agent**：核对当前系统用户、配置目录和服务地址。若尚未完成配对，或旧主机凭证因重绑、解绑而失效，重新执行 `nia-agy pair` 并启动桥接进程。`status` 只显示保存的身份，不代表主机已在线。
 - **群里一直显示红色 `未连接`**：确认 `nia-agy start` 进程仍在运行，检查 `/tmp/nia-agy.log` 中的启动或连接错误，并用 `nia-agy status` 核对群内 Agent 与保存的身份是否一致。若日志出现 `4409`，说明另一个连接接管了同一身份，应检查是否重复启动了进程。
 - **Google Antigravity 未登录或启动失败**：先在同一系统用户下运行 Google Antigravity CLI（`agy`），完成登录，确认 Node.js 版本和可执行文件路径。模型产品的登录与 Nia Teams 配对是两件事，不能互相替代。
-- **任务已执行但没有回复**：检查日志中的 Google Antigravity 执行结果和消息发布错误，确认任务没有被取消、群聊会话没有切换，且该轮产生了最终回复。若群聊发送工具已成功发布回复，不会再次发布该轮最终回复。
+- **任务已执行但没有回复**：检查守护进程日志中的运行或消息发布错误，确认任务未被取消，也未因群聊会话切换而中断。
 
 ## 三、CLI 参数、环境变量与包导出
 
@@ -202,8 +203,8 @@ ACP 批准结果返回 `outcome: { outcome: "selected", optionId }`，批准只�
 
 ### 2. 群聊工具、消息与原生提及
 
-- `nia_group_chat_send_message({ content })` 向当前群聊发布 Markdown 或 Rich HTML，常用于进度与提问；发送成功后抑制该轮结束时的最终回复发布。
-- `nia_group_chat_history({ limit?, offset? })` 分页读取历史；`limit` 默认 50、范围 1..100，`offset` 默认 0 且为非负整数。运行时注入当前 Nia session，模型不传目标群聊 ID。
+- `send_message({ content })` 向当前群聊发布 Markdown 或 Rich HTML，常用于进度与提问；所有回复均需显式发送，轮次结束文本保持私有。
+- `chat_history({ limit?, offset? })` 分页读取历史；`limit` 默认 50、范围 1..100，`offset` 默认 0 且为非负整数。运行时注入当前 Nia session，模型不传目标群聊 ID。
 - 群聊工具限定在当前活跃轮次；中断或群聊会话切换后，旧工具请求不能继续向新的群聊会话发布。
 
 群聊工具由随包的 MCP 服务提供，使用单轮临时凭证访问当前群聊；轮次结束后凭证失效。MCP 进程不读取 Nia Teams 私钥。报文与调用范围见 [协议规范](./docs/SPECIFICATION.md)。

@@ -56,6 +56,6 @@ test('rotated keys fail before lease and superseded host stops reconnecting', as
 test('structured RPC errors preserve code and retryability', async t => {
   const f = await fixture(t); const bridge = new BridgeClient(f.credentials); t.after(() => bridge.close());
   await bridge.start();
-  f.handleRpc = (rpc, ws) => { ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 1, requestId: rpc.requestId, ok: false, error: { code: 'invalid_request', message: 'Invalid parameters', retryable: false } })); return true; };
+  f.handleRpc = (rpc, ws) => { ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 2, requestId: rpc.requestId, ok: false, error: { code: 'invalid_request', message: 'Invalid parameters', retryable: false } })); return true; };
   await assert.rejects(bridge.rpc('group_chat.history', { sessionId }), error => error.code === 'invalid_request' && error.retryable === false && error.message === 'Invalid parameters');
 });

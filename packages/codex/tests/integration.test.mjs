@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { BridgeClient, stableExternalAgentThreadId } from '@nia-teams/agent-bridge-core';
 import { CodexHost } from '../dist/index.js';
-import { fixture, message, until, groupChatId, agentThreadId, sessionId, teamId } from '../../core/tests/helpers.mjs';
+import { fixture, message, until, groupChatId, agentThreadId, sessionId, teamId, contract } from '../../core/tests/helpers.mjs';
 const codexBin = fileURLToPath(new URL('./mock-codex.mjs', import.meta.url));
 async function setup(t, options = {}) {
   const f = await fixture(t), errors = [];
@@ -32,16 +32,14 @@ async function waitResponse(log, id) {
 }
 const complete = (ids, items = [], error) => ({ method: 'turn/completed', params: { threadId: ids.threadId, turn: { id: ids.turnId, status: error ? 'failed' : 'completed', items, error } } });
 
-test('stdio initialize → thread/start → turn/start → agentMessage → publication and idle; resume and durable mappings', async t => {
+test('stdio initialize → thread/start → turn/start → private agentMessage and idle; durable resume', async t => {
   const { f, host, log } = await setup(t);
   f.send(message('Hello'));
-  await until(() => f.rpcs.some(r => r.method === 'group_chat.send_message'));
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
   const entries = await log();
   assert.deepEqual(entries.slice(0, 2).map(m => m.method), ['initialize', 'initialized']);
-  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.1.0' });
-  assert.equal(f.rpcs.find(r => r.method === 'group_chat.send_message').params.content, 'Hello from Codex');
-  assert.match(f.rpcs.find(r => r.method === 'group_chat.send_message').params.toolCallId, /^turn:codex-1:turn-1$/);
+  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.2.0' });
+  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
   await host.message(message('second hold'));
   assert.equal((await log()).filter(m => m.method === 'thread/resume').length, 1);
   const saved = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'));
@@ -52,16 +50,16 @@ test('stdio initialize → thread/start → turn/start → agentMessage → publ
 test('dynamic tool request results use contentItems/inputText; history is session scoped; tool send suppresses duplicate final', async t => {
   const { f, log, emit, active } = await setup(t);
   const ids = await active();
-  await emit({ id: 'history', method: 'item/tool/call', params: { ...ids, callId: 'h1', namespace: null, tool: 'nia_group_chat_history', arguments: { limit: 10, offset: 2 } } });
+  await emit({ id: 'history', method: 'item/tool/call', params: { ...ids, callId: 'h1', namespace: null, tool: 'chat_history', arguments: { limit: 10, offset: 2 } } });
   const history = await waitResponse(log, 'history');
   assert.equal(history.result.success, true); assert.equal(history.result.contentItems[0].type, 'inputText');
   assert.deepEqual(f.rpcs.find(r => r.method === 'group_chat.history').params, { sessionId, limit: 10, offset: 2 });
-  await emit({ id: 'send', method: 'item/tool/call', params: { ...ids, callId: 's1', namespace: null, tool: 'nia_group_chat_send_message', arguments: { content: 'Progress update' } } });
+  await emit({ id: 'send', method: 'item/tool/call', params: { ...ids, callId: 's1', namespace: null, tool: 'send_message', arguments: { content: 'Progress update' } } });
   assert.equal((await waitResponse(log, 'send')).result.success, true);
   await emit(complete(ids, [{ type: 'agentMessage', id: 'a', text: 'Internal status note' }]));
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
   assert.deepEqual(f.rpcs.filter(r => r.method === 'group_chat.send_message').map(r => r.params.content), ['Progress update']);
-  await emit({ id: 'stale', method: 'item/tool/call', params: { ...ids, callId: 'stale', tool: 'nia_group_chat_send_message', arguments: { content: 'No' } } });
+  await emit({ id: 'stale', method: 'item/tool/call', params: { ...ids, callId: 'stale', tool: 'send_message', arguments: { content: 'No' } } });
   assert.equal((await waitResponse(log, 'stale')).result.success, false);
 });
 
@@ -125,9 +123,8 @@ test('independent GroupChat threads, session rotation interrupts old turn, delta
   const ids = { threadId: 'codex-1', turnId: 'turn-3' };
   await emit({ method: 'item/agentMessage/delta', params: { ...ids, itemId: 'delta', delta: 'From delta' } });
   await emit(complete(ids));
-  await until(() => f.rpcs.some(r => r.method === 'group_chat.send_message'));
-  assert.equal(f.rpcs.find(r => r.method === 'group_chat.send_message').params.sessionId, rotated.sessionId);
-  assert.equal(f.rpcs.find(r => r.method === 'group_chat.send_message').params.content, 'From delta');
+  await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle' && r.params.deliveryId === rotated.deliveryId));
+  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
   await emit(complete({ threadId: 'codex-2', turnId: 'turn-2' }, [], { message: 'Model failed' }));
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.errorMessage === 'Model failed'));
 });
@@ -163,19 +160,19 @@ test('persisted GroupChat mapping resumes after host restart rather than startin
   assert.equal(log.find(m => m.method === 'thread/resume').params.threadId, 'codex-1');
 });
 
-test('cancellation interrupts a turn blocked on final publication without stalling the thread lock', async t => {
+test('cancellation interrupts a turn blocked on final idle without stalling the thread lock', async t => {
   const { f, host, log, emit, active } = await setup(t);
   const ids = await active();
-  f.holdRpc.add('group_chat.send_message');
+  f.holdRpc.add('thread.activity');
   await emit(complete(ids, [{ type: 'agentMessage', id: 'a', text: 'Pending publication' }]));
-  await until(() => f.rpcs.some(r => r.method === 'group_chat.send_message'));
+  await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
   f.send({ ...message(), type: 'thread.cancel', reason: 'user_aborted' });
   const end = Date.now() + 4000;
   while (!(await log()).some(m => m.method === 'turn/interrupt')) {
     if (Date.now() > end) throw new Error('Cancellation blocked behind publication');
     await new Promise(r => setTimeout(r, 5));
   }
-  f.holdRpc.delete('group_chat.send_message');
+  f.holdRpc.delete('thread.activity');
   await host.message(message('hold next'));
   assert.equal((await log()).filter(m => m.method === 'turn/start').length, 2);
 });
@@ -190,4 +187,30 @@ test('file approval preview comes from item lifecycle, and unknown server reques
   assert.match(card.params.description, /example.txt/); assert.match(card.params.description, /new content/);
   await emit({ id: 'unknown', method: 'item/unknown/requestApproval', params: ids });
   assert.equal((await waitResponse(log, 'unknown')).error.code, -32601);
+});
+
+
+test('v2 contract, server reminder and upgrade safety start fresh instead of resuming legacy tools', async t => {
+  const { f, host, log } = await setup(t);
+  await writeFile(`${f.dir}/threads.json`, JSON.stringify({ [agentThreadId]: { codexThreadId: 'old-tools', groupChatId, updatedAt: 'now' } }), { mode: 0o600 });
+  // Reload through a new host, as on a real upgrade.
+  await host.close();
+  const bridge = new BridgeClient(f.credentials);
+  const restarted = new CodexHost(bridge, { configDir: f.dir, cwd: f.dir, codexBin });
+  t.after(async () => { await restarted.close(); bridge.close(); });
+  await restarted.start(); await bridge.start();
+  const first = message(); f.send(first);
+  const idle = () => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle');
+  await until(() => idle().length === 1);
+  const reminder = { ...message(), prompt: '<system-reminder>Publish a reply.</system-reminder>' };
+  f.send(reminder); await until(() => idle().length === 2);
+  const entries = (await restarted.app.request('test/log', {})).log;
+  const start = entries.find(e => e.method === 'thread/start');
+  assert.deepEqual(start.params.dynamicTools, contract.tools.map(t => ({ type: 'function', ...t })));
+  assert.equal(start.params.developerInstructions, contract.systemPrompt);
+  assert.equal(entries.filter(e => e.method === 'thread/resume').length, 1);
+  assert.notEqual(entries.find(e => e.method === 'thread/resume').params.threadId, 'old-tools');
+  assert.equal(entries.filter(e => e.method === 'turn/start')[1].params.input[0].text, reminder.prompt);
+  assert.equal(idle()[1].params.deliveryId, reminder.deliveryId);
+  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
 });

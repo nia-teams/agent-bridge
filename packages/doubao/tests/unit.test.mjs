@@ -42,7 +42,7 @@ async function setup(t, os = 'darwin') {
   const create = await loadRunner(os);
   const make = options => create({ cwd: dir, platform: os === 'linux' ? 'headless' : 'auto', ...options });
   const calls = async () => (await readFile(join(dir, 'calls.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).args);
-  const context = overrides => ({ prompt: 'hi --full-auto -literal', signal: new AbortController().signal, session: async () => {}, ...overrides });
+  const context = overrides => ({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'hi --full-auto -literal', signal: new AbortController().signal, session: async () => {}, ...overrides });
   return { dir, make, calls, context, cdp };
 }
 test('desktop create then send persists receipt and returns reply.text without navigation; exact flags match real parser', async t => {
@@ -50,7 +50,7 @@ test('desktop create then send persists receipt and returns reply.text without n
   const runner = make(); const sessions = [];
   await Promise.all([runner.ready(), runner.ready()]);
   const result = await runner(context({ session: async id => sessions.push(id) }));
-  assert.deepEqual(result, { text: 'Doubao final reply' });
+  assert.deepEqual(result, undefined);
   await runner(context({ resume: sessions[0] }));
   const records = await calls();
   assert.equal(records.filter(a => a.includes('cdp')).length, 1);
@@ -60,7 +60,7 @@ test('desktop create then send persists receipt and returns reply.text without n
   assert.equal(create[create.indexOf('--workspace') + 1], dir);
   assert.equal(create[create.indexOf('--runtime') + 1], 'local');
   assert.equal(create[create.indexOf('--permission') + 1], 'AskOnRisk');
-  assert.equal(create.at(-1), 'hi --full-auto -literal');
+  assert.equal(create.at(-1), 'Server policy\n\nhi --full-auto -literal');
   assert.ok(records.some(a => a.includes('send') && a.includes(sessions[0].split(':')[1])));
   for (const args of records) assert.doesNotThrow(() => parseOptions(args));
   assert.equal(records.some(a => a.includes('launch') || a.includes('open') || a.includes('login')), false);
@@ -102,7 +102,7 @@ test('abort during first submission still collects receipt and stops its exact r
   const { make, calls, context } = await setup(t);
   const runner = make(); await runner.ready(); const controller = new AbortController();
   let persisted = false;
-  const turn = runner(context({ prompt: 'hold-submit', signal: controller.signal, session: async () => { persisted = true; } }));
+  const turn = runner(context({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'hold-submit', signal: controller.signal, session: async () => { persisted = true; } }));
   const timer = setTimeout(() => controller.abort(new Error('cancelled')), 80);
   await assert.rejects(turn, /cancelled/); clearTimeout(timer);
   const stopped = (await calls()).find(a => a.includes('stop'));
@@ -110,7 +110,7 @@ test('abort during first submission still collects receipt and stops its exact r
 });
 for (const scenario of ['malformed', 'missing-receipt', 'authfail']) test(`submission ${scenario} is never resent or published`, async t => {
   const { make, calls, context } = await setup(t);
-  await assert.rejects(make()(context({ prompt: scenario })), /no valid|sign-in/);
+  await assert.rejects(make()(context({ systemPrompt: 'Server policy', send: async () => {}, prompt: scenario })), /no valid|sign-in/);
   assert.equal((await calls()).filter(a => a.includes('create')).length, 1);
 });
 for (const scenario of ['mismatch', 'empty', 'approval']) test(`wait ${scenario} refuses a false final`, async t => {

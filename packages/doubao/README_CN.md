@@ -12,9 +12,11 @@ nia-doubao start --cwd "." --daemon
 
 AI 编程助手请加载 [skills/nia-teams-doubao/SKILL.md](./skills/nia-teams-doubao/SKILL.md)；安装后路径为 `node_modules/@nia-teams/doubao-bridge/skills/nia-teams-doubao/SKILL.md`。
 
+邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
+
 ## 一、产品背景与协作模型
 
-桌面模式经本机 CDP 提取已登录 Cookie，再用 HTTP 本地 Runtime 执行任务；官方 CLI 模式通过本地进程执行任务，并在交互终端接力登录。两种模式都按群聊保存会话。
+桌面模式经本机 CDP 提取已登录 Cookie，再通过本地 HTTP 运行时执行任务；官方 CLI 模式通过本地进程执行任务，并在交互终端接力登录。两种模式都按群聊保存会话。
 
 - **一步创建并绑定，无需预先建 Agent 或配置 API Key**：在主机终端运行配对命令，在任意设备的浏览器打开生成的链接并登录 Nia Teams，即可新建外部 Agent 并绑定主机公钥。
 - **群聊实时状态与多轮会话隔离**：群聊底部显示该外部 Agent 的在线状态（`未连接`、`空闲待命`、`Thinking…`）。每个群聊使用独立的豆包会话，后续任务沿用该群聊上下文；各群聊共享主机上的代码目录。
@@ -43,12 +45,12 @@ npm install -g @nia-teams/doubao-bridge
 
 | 模式 | 宿主与登录 | 任务执行 |
 | --- | --- | --- |
-| 桌面客户端 `work` | `/Applications/DoubaoWork.app`，豆包工作；CDP 默认端口 9226 | HTTP 本地 Runtime |
-| 桌面客户端 `doubao` | `/Applications/Doubao.app`，豆包；CDP 默认端口 9225 | HTTP 本地 Runtime |
+| 桌面客户端 `work` | `/Applications/DoubaoWork.app`，豆包工作；CDP 默认端口 9226 | HTTP 本地运行时 |
+| 桌面客户端 `doubao` | `/Applications/Doubao.app`，豆包；CDP 默认端口 9225 | HTTP 本地运行时 |
 | 官方 CLI `cli` | `@bytedance/doubao-cli`，本地终端登录 | 官方 CLI 子进程 |
 | HTTP `headless` | 已预置的独立 HTTP 登录 | 显式选择 local 或 cloud Runtime |
 
-**桌面客户端模式**：先在所选 App 登录。桥接通过本机 CDP 的 `Network.getAllCookies` 读取登录 Cookie，再交给 HTTP 本地 Runtime；任务不操作窗口 DOM、不导航页面、不抢焦点。CDP 在启动和每轮前检查登录；启动未运行的 App 可能打开窗口，重启已有 App 需 `--restart-app` 授权。
+**桌面客户端模式**：先在所选 App 登录。桥接通过本机 CDP 的 `Network.getAllCookies` 读取登录 Cookie，再交给 HTTP 本地运行时；任务不操作窗口 DOM、不导航页面、不抢焦点。CDP 在启动和每轮前检查登录；启动未运行的 App 可能打开窗口，重启已有 App 需 `--restart-app` 授权。
 
 **官方 CLI 模式**：安装 `npm install -g @bytedance/doubao-cli`。交互终端中的桥接先检查 `auth status --verify`，未登录则在原终端运行 `login` 展示二维码，完成并复验后继续连接 Nia Teams。准备后台运行时先执行 `doubao login`；二维码只留在本地终端。
 
@@ -70,7 +72,6 @@ nia-doubao pair --name 'My Doubao'
 
 ```text
 Pairing code: A7F39C2B
-Open this URL to create or bind your external Agent:
 https://nia-teams.com/bridge/agent-pair/A7F39C2B
 ```
 
@@ -116,7 +117,7 @@ pgrep -af '[n]ia-doubao.*start'
 
 各群聊的模型上下文彼此独立，但共享 `--cwd` 指定的代码目录、仓库和本地工具。凭证与会话记录分别保存在 `credentials.json` 和 `threads.json` 中。
 
-#### 本地 Runtime、会话恢复与取消
+#### 本地运行时、会话恢复与取消
 
 桌面模式默认 `--runtime local`，把绝对 `--cwd` 传为本地工作区。两种桌面 App 都在新建会话时使用 work 模式，后续消息复用既有会话。`--runtime cloud` 不挂载本机项目目录；此时本地 cwd 只是进程目录。
 
@@ -126,18 +127,20 @@ pgrep -af '[n]ia-doubao.*start'
 
 HTTP 任务在一个等待完成的本地 worker 中执行。收到 conversationId/runId 后记录接受凭据；群聊取消先停止已接受的远端运行，再结束 worker。结果必须属于当前会话和运行，状态为 completed 且有回复文本才发布。官方 CLI 使用本地进程组取消，其会话与 HTTP 任务分开管理。
 
+过程输出留在本机，执行状态同步到群聊；成功完成后的非空回复在轮次结束时发布。
+
 ### 第 4 步：把外部 Agent 拉进群聊并验证在线状态
 
 点击配对成功页的 **前往群聊**，或打开 [Nia Teams](https://nia-teams.com) 进入左侧 **消息** 页：
 
-- **直接发起新对话**：在消息列表顶部的 Agent 快捷栏点击刚创建的外部 Agent 头像发起对话（Agent 较多时可点快捷栏右侧下箭头展开），或点击快捷栏最右侧的 **`+`**（新建聊天）创建多人群聊。
+- **发起新对话**：在消息列表顶部的 Agent 快捷栏点击刚创建的外部 Agent 头像发起对话（Agent 较多时可点快捷栏右侧下箭头展开），或点击快捷栏最右侧的 **`+`**（新建聊天）创建多人群聊。
 - **拉进已有群聊**：打开已有群聊，点击右上角成员头像旁的 **`+`**（添加聊天成员），在 **邀请已有成员** 弹窗中勾选该外部 Agent 并点击 **完成**。同一组织成员可将组织归属的 Agent 拉入群；「个人助理」仅创建者可拉入群，加入后群内其他成员也可 `@` 它。
 
 进入群聊后，查看底部输入框上方的状态栏：当该外部 Agent 的状态从红色的 **`未连接`** 变为 **`空闲待命`**，说明豆包桥接进程已经连通就绪。
 
 ### 第 5 步：在群聊中 `@` 它协作与日常管理
 
-在输入框输入 `@` 选中该外部 Agent 并发送任务。执行时状态栏显示 `Thinking…` 或正在运行的工具，轮次结束后，最终回复会发回群聊。后续日常管理按权限分为三类：
+在输入框输入 `@` 选中该外部 Agent 并发送任务。执行时状态栏显示 `Thinking…` 或正在运行的工具，完成后的回复发回群聊。后续日常管理按权限分为三类：
 
 - **临时离线（主机侧操作）**：以前台方式运行时，在主机终端按 `Ctrl+C` 停止 `nia-doubao start`；后台运行时，对启动时记录的 PID 发送 SIGTERM。群内状态会变为 `未连接`，重新运行 `nia-doubao start --cwd /path/to/workspace` 即可恢复连接。
 - **更换主机或解绑主机（需该 Agent 的 `owner` 或 `admin`）**：迁移到新主机时，在新主机执行 `nia-doubao pair`，在浏览器配对页切换到 **重绑已有外部 Agent**，选中目标后点击 **确认重新绑定**。若仅需解绑，在它的对话页或共同所在的群聊右上角打开应用菜单（网格图标 **Apps**）→ **Agent 设置**，点击 **解绑主机**。重绑或解绑会递增 `keyGeneration` 使旧主机凭证失效，并以关闭码 `4401` 断开旧连接。
@@ -149,7 +152,7 @@ HTTP 任务在一个等待完成的本地 worker 中执行。收到 conversation
 - **`nia-doubao status` 报错或绑定不是目标 Agent**：核对当前系统用户、配置目录和服务地址。若尚未完成配对，或旧主机凭证因重绑、解绑而失效，重新执行 `nia-doubao pair` 并启动桥接进程。`status` 只显示保存的身份，不代表主机已在线。
 - **群里一直显示红色 `未连接`**：确认 `nia-doubao start` 进程仍在运行，检查 `/tmp/nia-doubao.log` 中的启动或连接错误，并用 `nia-doubao status` 核对群内 Agent 与保存的身份是否一致。若日志出现 `4409`，说明另一个连接接管了同一身份，应检查是否重复启动了进程。
 - **豆包未登录或启动失败**：先在同一系统用户下运行豆包桌面客户端或 Doubao CLI，完成登录，确认 Node.js 版本和可执行文件路径。模型产品的登录与 Nia Teams 配对是两件事，不能互相替代。
-- **任务已执行但没有回复**：检查日志中的豆包执行结果和消息发布错误，确认任务没有被取消、群聊会话没有切换，且该轮产生了最终回复。豆包运行时返回 completed 状态且包含回复文本后，桥接才会发布该轮回复。
+- **任务已执行但没有回复**：检查守护进程日志中的运行或消息发布错误，确认任务未被取消，也未因群聊会话切换而中断。
 
 ## 三、CLI 参数、环境变量与包导出
 
@@ -187,7 +190,7 @@ nia-doubao --help
 | `resumeForBackend / SessionHost` | 按后端恢复群聊会话与管理轮次 |
 | `dist/**/*.d.ts` | 导出函数、配置与运行时接口的类型声明 |
 
-根模块通过具名导出提供接口，公开子路径为 `.` 与 `./package.json`。精确方法签名查询类型声明，运行时协议与豆包运行时的数据结构见 [docs/SPECIFICATION.md](./docs/SPECIFICATION.md)。
+根模块通过具名导出提供接口，公开子路径为 `.` 与 `./package.json`。方法签名查询类型声明，运行时协议与豆包运行时的数据结构见 [docs/SPECIFICATION.md](./docs/SPECIFICATION.md)。
 
 嵌入时调用 `createDoubaoRunner(options)`，等待 `runner.ready()` 完成豆包登录检查，再交给 core `runSessionDaemon`。`resumeForBackend` 仅接受所选后端的会话前缀；桥接服务的 `sessionId` 不传作豆包会话 ID。
 
@@ -207,7 +210,7 @@ nia-doubao --help
 
 ### 2. 群聊工具、消息与原生提及
 
-桌面 HTTP 和官方 CLI 的任务回复由运行器返回文本，再经共享发布队列发送。本包不向豆包模型注入 MCP 群聊工具；`nia_group_chat_send_message` / `nia_group_chat_history` 是支持动态工具或 MCP 的适配器使用的协作接口，自定义接入方也可调用对应的桥接 RPC。
+桌面 HTTP 运行时和豆包 CLI 在轮次结束时发布完成后的回复。豆包不提供自定义群聊工具，过程输出留在本机。
 
 传入提示列出 `Members: Alice (<userId>), ...`，消息段列出发送者 ID、时间、消息 ID、回复关系与附件转写。通用消息也可表现为 `[chat:<chatId>] Alice (<userId>): ...`，结构化频道可携带 `senderId`；原始桥接帧字段为 `messages[].authorId`。回复中使用 `<mention userId="24-hex-id" />` 触发原生通知，ID 从发送者或成员列表取得。
 

@@ -1,4 +1,4 @@
-import { formatThreadMessage as formatThread } from '@nia-teams/agent-bridge-core/format';
+import { resolveThreadPrompt as formatThread } from '@nia-teams/agent-bridge-core/format';
 import { randomUUID } from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -14,7 +14,7 @@ export const PermissionRequestSchema = z.object({
   params: z.object({ request_id: z.string().trim().min(1).max(128), tool_name: z.string().min(1), description: z.string(), input_preview: z.string() }),
 });
 type PermissionRequest = z.infer<typeof PermissionRequestSchema>['params'];
-type Activity = { state: 'idle' | 'executing' | 'waiting'; label?: string };
+type Activity = { state: 'idle' | 'executing' | 'waiting'; label?: string; deliveryId?: string };
 interface Thread { frame: ThreadMessage; activity: Activity; order: number; revision: number; stop: AbortController }
 interface CardWait {
   thread: Thread; groupChatId: string; sessionId: string; agentThreadId: string; cardId: string;
@@ -25,12 +25,14 @@ const id = z.string().regex(/^[a-f\d]{24}$/i);
 const sendInput = z.object({ group_chat_id: id, content: z.string().trim().min(1), keep_working: z.boolean().optional() }).strict();
 const historyInput = z.object({ group_chat_id: id, limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).default(0) }).strict();
 
-export { formatThreadMessage as formatThread } from '@nia-teams/agent-bridge-core/format';
+export { resolveThreadPrompt as formatThread } from '@nia-teams/agent-bridge-core/format';
 
 
 /** One Claude Code session; GroupChats share the host context, not isolated model sessions. */
 export class ChannelServer {
-  readonly mcp: Server;
+  mcp!: Server;
+  private resolveConnected!: () => void;
+  private readonly connected = new Promise<void>(resolve => { this.resolveConnected = resolve; });
   private readonly threads = new Map<string, Thread>();
   private readonly operations = new Map<string, Promise<void>>();
   private readonly cards = new Map<string, CardWait>();
@@ -43,10 +45,6 @@ export class ChannelServer {
   private closing = false;
   private disposal?: Promise<void>;
   constructor(readonly bridge: BridgeClient, private readonly log: (message: string) => void = message => console.error(`Nia Teams: ${message}`)) {
-    this.mcp = new Server({ name: 'nia-teams', version: '0.1.0' }, {
-      capabilities: { tools: {}, experimental: { 'claude/channel': {}, 'claude/channel/permission': {} } },
-      instructions: NIA_CHANNEL_INSTRUCTIONS,
-    });
     this.publications = new PublicationQueue(bridge);
     this.disposers.push(
       bridge.onThreadMessage(frame => this.enqueue(frame.groupChatId, () => this.message(frame))),
@@ -54,23 +52,34 @@ export class ChannelServer {
       bridge.onThreadCancel(frame => this.enqueue(frame.groupChatId, () => this.cancel(frame))),
       bridge.onReady(() => { for (const thread of this.threads.values()) if (thread.activity.state !== 'idle') void this.activity(thread, thread.activity); }),
     );
-    this.mcp.setNotificationHandler(PermissionRequestSchema, ({ params }) => this.permission(params));
-    this.mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
-      { name: 'nia_group_chat_send_message', description: 'Publish a GroupChat reply. Terminal text is private. Pass group_chat_id from the channel block. Use keep_working: true for interim updates; omit it on the final reply to mark idle.', inputSchema: {
+    this.refresh = setInterval(() => {
+      for (const thread of this.threads.values()) if (thread.activity.state !== 'idle') void this.activity(thread, thread.activity);
+    }, 30_000);
+    this.refresh.unref();
+  }
+  private createMcp(): Server {
+    const bridge = this.bridge;
+    const mcp = new Server({ name: 'nia-teams', version: '0.2.0' }, {
+      capabilities: { tools: {}, experimental: { 'claude/channel': {}, 'claude/channel/permission': {} } },
+      instructions: `${bridge.getContract()!.systemPrompt}\n\n${NIA_CHANNEL_INSTRUCTIONS}`,
+    });
+    mcp.setNotificationHandler(PermissionRequestSchema, ({ params }) => this.permission(params));
+    mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [
+      { name: 'send_message', description: `${bridge.getContract()!.tools.find(t => t.name === 'send_message')?.description ?? 'send_message'} Pass group_chat_id; keep_working: true continues work, otherwise mark idle.`, inputSchema: {
         type: 'object', properties: { group_chat_id: { type: 'string', pattern: '^[a-fA-F0-9]{24}$' }, content: { type: 'string', minLength: 1 }, keep_working: { type: 'boolean', default: false } }, required: ['group_chat_id', 'content'], additionalProperties: false,
       } },
-      { name: 'nia_group_chat_history', description: 'Read paginated history for a tracked GroupChat.', inputSchema: {
+      { name: 'chat_history', description: `${bridge.getContract()!.tools.find(t => t.name === 'chat_history')?.description ?? 'chat_history'} Pass group_chat_id.`, inputSchema: {
         type: 'object', properties: { group_chat_id: { type: 'string', pattern: '^[a-fA-F0-9]{24}$' }, limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 }, offset: { type: 'integer', minimum: 0, default: 0 } }, required: ['group_chat_id'], additionalProperties: false,
       } },
     ] }));
-    this.mcp.setRequestHandler(CallToolRequestSchema, async request => {
+    mcp.setRequestHandler(CallToolRequestSchema, async request => {
       try {
         if (this.closing) throw new Error('Channel is closing');
-        if (request.params.name === 'nia_group_chat_send_message') {
+        if (request.params.name === 'send_message') {
           const input = sendInput.parse(request.params.arguments);
           const thread = this.thread(input.group_chat_id);
           const sessionId = thread.frame.sessionId;
-          const activityAfter: Activity = input.keep_working ? working : { state: 'idle' };
+          const activityAfter: Activity = input.keep_working ? working : { state: 'idle', deliveryId: thread.frame.deliveryId };
           const revision = ++thread.revision;
           await this.publications.enqueue({ niaSessionId: sessionId, toolCallId: randomUUID(), content: input.content, activityAfter,
             signal: thread.stop.signal,
@@ -79,9 +88,9 @@ export class ChannelServer {
               thread.activity = activityAfter; return true;
             },
           });
-          return { content: [{ type: 'text', text: 'Published to GroupChat.' }] };
+          return { content: [{ type: 'text', text: '消息已发布到聊天' }] };
         }
-        if (request.params.name === 'nia_group_chat_history') {
+        if (request.params.name === 'chat_history') {
           const input = historyInput.parse(request.params.arguments);
           const result = await bridge.rpc('group_chat.history', { sessionId: this.thread(input.group_chat_id).frame.sessionId, limit: input.limit, offset: input.offset });
           return { content: [{ type: 'text', text: typeof result.text === 'string' ? result.text : JSON.stringify(result) }] };
@@ -89,12 +98,14 @@ export class ChannelServer {
         throw new Error(`Unknown tool: ${request.params.name}`);
       } catch (error) { return { isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] }; }
     });
-    this.refresh = setInterval(() => {
-      for (const thread of this.threads.values()) if (thread.activity.state !== 'idle') void this.activity(thread, thread.activity);
-    }, 30_000);
-    this.refresh.unref();
+    return mcp;
   }
-  async connect(transport: Transport): Promise<void> { await this.mcp.connect(transport); await this.bridge.start(); }
+  async connect(transport: Transport): Promise<void> {
+    await this.bridge.start();
+    this.mcp = this.createMcp();
+    await this.mcp.connect(transport);
+    this.resolveConnected();
+  }
   private enqueue(groupChatId: string, operation: () => Promise<void>): Promise<void> {
     const next = (this.operations.get(groupChatId) ?? Promise.resolve()).catch(() => {}).then(async () => { if (!this.closing) await operation(); });
     this.operations.set(groupChatId, next);
@@ -111,6 +122,7 @@ export class ChannelServer {
     await this.bridge.rpc('thread.activity', { sessionId: thread.frame.sessionId, ...activity }, AbortSignal.timeout(1500)).catch(error => this.log(String(error)));
   }
   private async message(frame: ThreadMessage): Promise<void> {
+    await this.connected;
     if (this.closing) return;
     let thread = this.threads.get(frame.groupChatId);
     if (thread && thread.frame.sessionId !== frame.sessionId) {
@@ -202,7 +214,7 @@ export class ChannelServer {
   }
   close(): Promise<void> {
     if (this.disposal) return this.disposal;
-    this.closing = true; clearInterval(this.refresh); this.publications.close();
+    this.closing = true; this.resolveConnected(); clearInterval(this.refresh); this.publications.close();
     for (const dispose of this.disposers) dispose();
     for (const thread of this.threads.values()) thread.stop.abort();
     this.disposal = (async () => {
@@ -210,7 +222,7 @@ export class ChannelServer {
         ...[...this.cards.values()].map(w => this.finishCard(w.cardId, 'deny', true, false)),
         ...[...this.threads.values()].filter(t => t.activity.state !== 'idle').map(t => this.activity(t, { state: 'idle' })),
       ]);
-      this.bridge.close(); await this.mcp.close(); this.threads.clear();
+      this.bridge.close(); await this.mcp?.close(); this.threads.clear();
     })();
     return this.disposal;
   }

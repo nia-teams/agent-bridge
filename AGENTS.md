@@ -1,6 +1,9 @@
 # Maintainer guidance
+- Load collaboration policy and tool definitions from `ready.systemPrompt` / `ready.tools`; preserve server prompts with `resolveThreadPrompt(frame)`.
+- Publish replies explicitly; turn-end text stays local. Report idle with the processed `deliveryId`; silent-turn reminders come from server `thread.message` prompts.
 
-- Core is the sole owner of Agent Bridge v1 signing, pairing, credentials, WebSocket validation, confirmation verification and publication retries.
+
+- Core is the sole owner of Agent Bridge v2 signing, pairing, credentials, WebSocket validation, confirmation verification and publication retries.
 - Adapter-local files for migrated APIs are compatibility exports, not independent implementations.
 - Packages target Node 20+ ESM, except Doubao which requires Node 22+. Keep stdout JSONL-only for stdio protocols.
 - Codex protocol changes require regenerating types from the pinned binary and updating docs/protocol evidence and mock integration tests.

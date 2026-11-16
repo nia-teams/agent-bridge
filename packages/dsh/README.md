@@ -18,6 +18,8 @@ When configuring or embedding this package with an AI coding agent (Nia Teams Ag
 - Installed via `dsh plugin --profile web add`: `~/.dsh/profiles/web/node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md` (adjust for `$DSH_HOME` or another profile name)
 - Installed via `npm install`: `node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md` (or [`skills/nia-teams-dsh/SKILL.md`](./skills/nia-teams-dsh/SKILL.md) in this repository)
 
+For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+
 ## 1. Product Overview & Collaboration Model
 
 Nia Teams is a multi-user group-chat application where humans and AI Agents collaborate. Connecting a DeepSeek Harness host lets teammates `@` an external Agent in Nia Teams GroupChats while keeping your codebases, developer tools, and model-provider configuration in the environment where you run DSH (a cloud server, dev box, container, or workstation):
@@ -99,6 +101,8 @@ dsh web
 
 `dsh web` is a long-running Node.js daemon (supported on macOS and Linux) that requires no desktop GUI or browser—run `dsh web` directly on headless cloud servers, containers, or workstations alike (for example inside `tmux` or `systemd`; do not use `dsh headless`, which runs a single task and exits). On boot, `@nia-teams/dsh-plugin` opens an authenticated WebSocket to `wss://nia-teams.com/ws/agent-bridge` and automatically reconnects across network interruptions.
 
+Streamed output stays on the host. Thinking and tool updates sync live activity status; GroupChat replies are published through `send_message`.
+
 ### Step 4: Add the Agent to a GroupChat & Verify Presence
 
 Click **前往群聊** on the pairing confirmation page, or open [Nia Teams](https://nia-teams.com) and enter **消息** (Messages) in the left navigation rail:
@@ -110,7 +114,7 @@ Check the status bar just above the message composer: once the Agent's status ch
 
 ### Step 5: `@` Mention in Chat & Lifecycle Management
 
-Type `@` in the GroupChat composer to mention the external Agent. Its status updates live (`Thinking…`, `Running bash…`), and root replies are published back to the GroupChat automatically at turn end. Day-to-day lifecycle actions split into three permission levels:
+Type `@` in the GroupChat composer to mention the external Agent. Its status updates live (`Thinking…`, `Running bash…`), and replies appear in GroupChat. Day-to-day lifecycle actions split into three permission levels:
 
 - **Stop temporarily (on the host)**: Press `Ctrl+C` in the host terminal to stop `dsh web`; GroupChat presence changes to `未连接` until you run `dsh web` again.
 - **Migrate to a new host or unpair (`owner` or `admin` of the Agent)**: To move the Agent to another host, run `nia-dsh pair` on the new host, switch the pairing page tab to **重绑已有外部 Agent**, select the Agent, and click **确认重新绑定**. To unpair the current host without rebinding, open the Apps menu (grid icon `Apps`) → **Agent 设置** in the top-right header of the Agent's chat or a shared GroupChat and click the **解绑主机** button. Completing a rebind or unpairing immediately disconnects the old host with close code `4401`.
@@ -197,8 +201,8 @@ Requires Node.js 20+ and a DeepSeek Harness `0.2.x` host providing `agents` (sta
 ### 2. Ordinary Questions, GroupChat Tools & Prompt Injection
 
 - **Ordinary questions (`user-questions/request`)**: Posts numbered choices in the GroupChat (mentioning the invoker when a 24-hex user ID is present) and waits FIFO per GroupChat. Any human trigger in the GroupChat can reply with `1`, an option label, `1,2` for multi-select, free text, or per-line / `Q1=1` batch answers. Question batches mixing approval-intent and ordinary items without request-level `request.intent` approval are rejected.
-- **`nia_group_chat_send_message({ content })`**: Publishes an immediate mid-turn message (Markdown, Rich HTML, `<mention userId="..." />`) and suppresses automatic end-of-turn publication for that turn; finish the turn with a brief internal note.
-- **`nia_group_chat_history({ limit?, offset? })`**: Reads older GroupChat messages (`limit` defaults to `50` in `1..100`, `offset` defaults to `0`). Both tools enforce `ownsAgent(agent)` (root Agent and `isOwnedBy` descendants only); child-agent final text stays private to the parent Agent.
+- **`send_message({ content })`**: Publishes a message (Markdown, Rich HTML, `<mention userId="..." />`). Every reply requires an explicit call; turn-end text stays private.
+- **`chat_history({ limit?, offset? })`**: Reads older GroupChat messages (`limit` defaults to `50` in `1..100`, `offset` defaults to `0`). Both tools enforce `ownsAgent(agent)` (root Agent and `isOwnedBy` descendants only); child-agent final text stays private to the parent Agent.
 - **Runtime prompt injection**: During `system-prompt/assemble`, the plugin injects GroupChat mention syntax (`<mention userId="24-hex-id" />`) and Rich HTML styling rules (`var(--*)` CSS variables, inline SVG icons, mobile-safe layout) without modifying host prompt files.
 
 - **Sender identity and native mentions**: Incoming headers list sender and member IDs; use `<mention userId="24-hex-id" />` to notify a member. Plain `@Name` does not create a mention.
@@ -218,8 +222,8 @@ Each external Agent has its own member list (`owner`, `admin`, `member`) enforce
 
 - **Ed25519 proof-of-possession & Challenge-Lease auth**: During pairing, the host generates an Ed25519 keypair (keeping the private key inside the host's `credentials.json`), waits for any signed-in browser session to claim the pairing code, and signs a registration proof to complete binding. On each subsequent WebSocket connection, the host signs a short-lived server challenge to obtain a 60-second single-use lease—no OAuth callback ports and no static API keys.
 - **Transport keepalive & reconnection**: Exponential reconnect backoff from 1s to a 30s base cap with `0.75–1.25` jitter; 20s heartbeat, 60s inbound idle timeout, 15s handshake/ready timeout, 30s RPC timeout, and 512 KiB JSON-text frame limit. Close code `4409` indicates a superseded host and stops reconnecting.
-- **Delivery acknowledgment & deduplication**: Each `(groupChatId, teamId)` maps to a deterministic DSH session ID via `stableExternalAgentThreadId(groupChatId, teamId)`. Push frames are acknowledged only after all registered handlers resolve, with an in-memory 2,000-entry `(sessionId, deliveryId)` cache suppressing duplicate deliveries across transient retries.
-- **Publication retries (`PublicationQueue`) & disposal**: Final turn replies (`turn:<DSH-session-id>:<turn>`) and ordinary question prompts buffer in memory across brief disconnects (FIFO, up to 256 entries / 16 MiB), flushing on `ready` and retrying transient failures every 2s while preserving the original Nia `sessionId` and `toolCallId`. `executing` and `waiting` activity states renew every 30s; plugin disposal aborts pending waits, clears the publication queue, unregisters tools and listeners, disposes owned Agent handles, and closes the WebSocket.
+- **Delivery and reconnection**: Each GroupChat has its own DSH session. The bridge acknowledges handled messages and suppresses duplicate deliveries during brief network interruptions.
+- **Publication retries and shutdown**: Outgoing messages buffer in memory during brief disconnects. Plugin shutdown cancels pending work, clears the queue, and closes the connection.
 
 ---
 
@@ -269,7 +273,7 @@ npm pack --dry-run
 
 - Consumer AI skill: [`skills/nia-teams-dsh/SKILL.md`](./skills/nia-teams-dsh/SKILL.md) (`~/.dsh/profiles/<profile>/node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md` for `dsh plugin add`, or `node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md` for `npm install`)
 - Repository maintainer context: [`AGENTS.md`](./AGENTS.md)
-- Agent Bridge v1 wire specification: [`docs/SPECIFICATION.md`](./docs/SPECIFICATION.md)
+- Agent Bridge v2 wire specification: [`docs/SPECIFICATION.md`](./docs/SPECIFICATION.md)
 
 ## License
 

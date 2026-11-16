@@ -22,6 +22,8 @@ AI 编程助手请加载 [`./skills/nia-teams-claude-code/SKILL.md`](./skills/ni
 
 [English](./README.md) · [协议规范](./docs/SPECIFICATION.md) · [维护说明](./AGENTS.md)
 
+邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
+
 ## 产品与协作边界
 
 [Nia Teams](https://nia-teams.com) 提供人类与 Agent 共同参与的 GroupChat。消息时间线呈现已发布回复，输入框上方的活动状态显示执行中、等待确认或空闲；TaskBar 在输入框附近呈现特定工具调用的确认卡。配对将主机密钥绑定到一个外部 Agent 身份，模型、代码目录与工具仍由你自己的电脑或服务器运行。
@@ -34,7 +36,7 @@ AI 编程助手请加载 [`./skills/nia-teams-claude-code/SKILL.md`](./skills/ni
 | `@nia-teams/claude-code-plugin` | 认证连接、Channel 通知、群聊回复与历史工具、活动续租、权限验签转发 |
 | Nia Teams | 群聊成员管理、外部 Agent 配对、TaskBar UI、审批授权与签名确认 |
 
-`nia-claude start` 通过 `@anthropic-ai/claude-agent-sdk` 调用本地 Claude CLI，为每个群聊保存独立会话，需要工具权限时在 TaskBar 弹出权限确认卡。交互式 Channel 模式中，MCP 提供 stdio 与工具发现，`claude/channel` 提供宿主事件，`claude/channel/permission` 提供权限转发，Agent Bridge v1 提供 Nia Teams 认证消息与确认卡。Channel 模式由交互宿主运行模型，后台模式通过 SDK 启动本地 Claude CLI。两种方式均不开放公网 HTTP 监听端口；工具执行受所选权限模式约束。
+`nia-claude start` 通过 `@anthropic-ai/claude-agent-sdk` 调用本地 Claude CLI，为每个群聊保存独立会话，需要工具权限时在 TaskBar 弹出权限确认卡。交互式 Channel 模式中，MCP 提供 stdio 与工具发现，`claude/channel` 提供宿主事件，`claude/channel/permission` 提供权限转发，Agent Bridge 提供 Nia Teams 认证消息与确认卡。Channel 模式由交互宿主运行模型，后台模式通过 SDK 启动本地 Claude CLI。两种方式均不开放公网 HTTP 监听端口；工具执行受所选权限模式约束。
 
 ## 快速接入
 
@@ -53,7 +55,7 @@ claude plugin marketplace add nia-teams/agent-bridge
 claude plugin install nia-teams@nia-teams --scope user
 ```
 
-本机安装一次，对所有工作目录生效。插件自带 MCP 启动配置（`.mcp.json`），并显式注册 `/nia-teams:nia-teams-claude-code`；**无需在业务代码仓库创建任何配置文件**。本仓库的 marketplace manifest 直接登记 `nia-teams@nia-teams`，无需另建 marketplace 仓库。
+本机安装一次，对所有工作目录生效。插件自带 MCP 启动配置（`.mcp.json`），并显式注册 `/nia-teams:nia-teams-claude-code`；**无需在业务代码仓库创建任何配置文件**。本仓库的 marketplace manifest 登记 `nia-teams@nia-teams`，无需另建 marketplace 仓库。
 
 不使用插件系统时，等价的用户级注册命令是 `claude mcp add --scope user nia-teams -- npx -y @nia-teams/claude-code-plugin mcp`（兼容宿主如 CodeBuddy CLI 可将 `claude` 替换为 `codebuddy`）；本地源码调试先运行 `npm ci && npm run build`，再使用 `claude mcp add --scope user nia-teams -- node /absolute/path/to/agent-bridge/packages/claude-code/bin/nia-claude.mjs mcp`。插件与纯 MCP 注册二选一，不要让两条连接竞争同一个 Agent。`npx skills add nia-teams/agent-bridge` 仅安装 Skill，不注册 MCP Server 或启用 Channel。
 
@@ -69,7 +71,6 @@ npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
 
 ```text
 Pairing code: A7F39C2B
-Open this URL to create or bind your external Agent:
 https://nia-teams.com/bridge/agent-pair/A7F39C2B
 ```
 
@@ -109,7 +110,7 @@ pgrep -af '[n]ia-claude.*start'
 
 - 每个群聊的 Claude Code 会话 ID 保存在凭证目录的私有 `threads.json`，后续轮次与进程重启读取并恢复该群聊会话。各群聊共享 `--cwd` 指定的项目目录。
 - SDK 设置 `strictMcpConfig: true`，启动时添加 `--strict-mcp-config`，仅使用本次传入的群聊 MCP 工具。用户、项目与本地设置仍参与权限规则和钩子处理。
-- `nia_group_chat_send_message` 与 `nia_group_chat_history` 在当前群聊作用域内执行；最终回复在轮次结束时发布，显式发送成功后不再重复发布该轮最终文本。
+- `send_message` 与 `chat_history` 在当前群聊作用域内执行；所有回复均需显式调用 `send_message`，轮次结束文本保持私有。
 - `canUseTool` 收到工具权限请求时，在 TaskBar 弹出权限确认卡；`AskUserQuestion` 向发起人提问并等待群聊回复。已有允许规则不触发重复审批，`--full-auto` 选择 Claude Code 的 `bypassPermissions` 并跳过桥接确认。
 - 同一凭证只运行一个 `start` 或 `mcp` 连接。macOS 上任务执行期间通过 `caffeinate` 防止系统休眠；SIGINT/SIGTERM 中止 SDK 查询并清理卡片与连接。
 
@@ -121,7 +122,7 @@ pgrep -af '[n]ia-claude.*start'
 claude --dangerously-load-development-channels plugin:nia-teams@nia-teams
 ```
 
-在本地确认 development-channel 警告与 MCP 授权。安装插件不会自动启用 Channel，每次启动会话仍需显式选择。该 flag 只绕过 Channel allowlist，不绕过组织策略；非交互式 `-p` 会忽略它。详见 [Channels reference](https://code.claude.com/docs/en/channels-reference)。
+在本地确认 development-channel 警告与 MCP 授权。安装插件不会启用 Channel，每次启动会话仍需显式选择。该 flag 只绕过 Channel allowlist，不绕过组织策略；非交互式 `-p` 会忽略它。详见 [Channels reference](https://code.claude.com/docs/en/channels-reference)。
 
 若后续进入 `claude-plugins-official` 列表并获准启用 Channel，安装该来源的插件后可改用 `claude --channels plugin:nia-teams@claude-plugins-official`。这是未来收录后的条件用法，并不表示当前已经收录；当前本仓库 marketplace 的名称是 `nia-teams`。
 
@@ -139,11 +140,17 @@ codebuddy --dangerously-load-development-channels plugin:nia-teams@nia-teams
 
 兼容性以协议为边界，请核对所用版本的 flag 与授权行为。本仓通过 SDK 客户端测试 MCP 契约，未声称验证某一 Claude Code 或 CodeBuddy 可执行版本。
 
-### 第 4 步：邀请进入 GroupChat 与调用
+### 第 4 步：邀请进入群聊与调用
 
 打开 Nia Teams「消息」，通过外部 Agent 快捷入口发起聊天，或在已有群聊成员区域点击 `+` 邀请。组织成员可邀请组织归属的 Agent；个人助理由创建者首次邀请。进入群聊后，成员可 `@` 它发送任务。保持宿主会话运行，确认活动状态显示已连接。
 
-传入消息头包含群聊标题、URL、成员 ID、发起人、消息、附件与转写。后台模式在轮次结束时发布最终回复；以下发送约定用于交互式 Channel 模式。终端输出不会自动发布：Claude 必须调用 `nia_group_chat_send_message` 并传入通知里的 `group_chat_id`。中途更新使用 `keep_working: true`；最终回复省略该字段，让状态回到空闲。提及成员使用 `<mention userId="24-hex-id" />`，而非纯文本 `@Name`。
+传入消息头包含群聊标题、URL、成员 ID、发起人、消息、附件与转写。后台模式通过 `send_message` 发布回复；交互式 Channel 模式额外使用以下路由参数。终端输出不会发布：Claude 必须调用 `send_message` 并传入通知里的 `group_chat_id`。中途更新使用 `keep_working: true`；最终回复省略该字段，让状态回到空闲。提及成员使用 `<mention userId="24-hex-id" />`，而非纯文本 `@Name`。
+
+群聊工具：
+
+- `send_message({ content })` 向当前群聊发送回复或进度；终端文本留在本机。
+- `chat_history({ limit?, offset? })` 分页读取群聊历史。
+- Channel 模式的两个工具均需传入通知中的 `group_chat_id`；发送进度时使用 `keep_working: true`。
 
 ### 第 5 步：TaskBar 工具确认
 
@@ -155,7 +162,7 @@ codebuddy --dangerously-load-development-channels plugin:nia-teams@nia-teams
 
 - 外部 Agent 的 `owner` / `admin` 可重绑或解绑主机；只有唯一剩余的 `owner` 可按 Nia Teams 移除规则归档。重绑/解绑递增 `keyGeneration` 并使旧主机失效，归档也会撤销连接。
 - 群聊成员可以调用 Agent 或忽略当前确认卡。批准 TaskBar 卡片的点击者必须同时是该外部 Agent 的有效成员（`owner` / `admin` / `member`）；Nia Teams 校验后才签发 Token。同群但不是 Agent 成员的人不能批准。
-- 主机独立验证 RS256 签名、issuer、audience、有效期、service 身份、人类确认、精确 card ID、工具名与 canonical argument digest。仅凭 `clickedBy.teamRole` 不构成批准证明。
+- 主机独立验证 RS256 签名、issuer、audience、有效期、service 身份、人类确认、 card ID、工具名与 canonical argument digest。仅凭 `clickedBy.teamRole` 不构成批准证明。
 - Agent 的 workload 身份字段 `sub`、`org:*`、`role:*` 不等于人类成员角色。本桥通过 Ed25519 challenge/lease 认证，不会把这些字段转换成本地 OS 权限。确认 Token 表示特定的人类已批准 service action。
 - 本地执行仍受 Claude Code 权限系统与 sandbox 约束。配对不意味着任意 shell 授权，也不会改写本地工具权限或宿主配置。
 
@@ -196,6 +203,6 @@ npm pack --dry-run
 
 ## 商标与许可证
 
-Claude and Claude Code are trademarks of Anthropic, PBC. `@nia-teams/claude-code-plugin` is maintained by Nia Teams and is not affiliated with or endorsed by Anthropic.
+Claude 与 Claude Code 是 Anthropic, PBC 的商标。`@nia-teams/claude-code-plugin` 由 Nia Teams 维护，与 Anthropic 无隶属关系，也未获其认可。
 
 [MIT](./LICENSE) © Nia Teams

@@ -12,6 +12,8 @@ nia-workbuddy start --cwd "." --daemon
 
 AI coding agents: load [skills/nia-teams-workbuddy/SKILL.md](./skills/nia-teams-workbuddy/SKILL.md); installed path: `node_modules/@nia-teams/workbuddy-plugin/skills/nia-teams-workbuddy/SKILL.md`.
 
+For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+
 ## 1. Product Overview & Collaboration Model
 
 The package runs tasks through the CodeBuddy Agent SDK using local desktop or CLI authentication. Each GroupChat retains its session, and teammates approve tool requests in TaskBar.
@@ -111,7 +113,7 @@ GroupChats have separate model contexts but share the files, repository, and loc
 
 Private `threads.json` stores each GroupChat’s CodeBuddy `session_id`; later queries pass it as `resume`. `SessionHost` serializes turns within a chat and queues incoming messages. Nia session rotation aborts the old query and clears old inputs. Each chat admits up to 64 queued messages by default; input admission and outgoing publication queues are separate.
 
-The bridge uses `query({ prompt, options })` and cancels through `AbortController` and the CodeBuddy query interrupt path. It consumes system, assistant, and result events; a successful result supplies the main final reply, rather than treating Subagent intermediate text as a root reply. Final replies and explicit GroupChat sends share publication state.
+SDK system, assistant, and result events drive session persistence and activity only. Terminal output stays on the host; GroupChat replies are published through `send_message`.
 
 Tool requests delivered to `canUseTool` become TaskBar cards. `AskUserQuestion` instead posts to GroupChat and waits for the task’s invoking human. Reply with text for one question; for multiple questions, use JSON keyed by question text, such as `{"Target branch":"main","Run tests":"yes"}`. Timeout or cancellation returns a deny result to the CodeBuddy Agent SDK.
 
@@ -129,7 +131,7 @@ Watch the activity strip above the composer: red **Disconnected** changes to **I
 
 ### Step 5: Mention the Agent and manage its lifecycle
 
-Type `@` in the composer and select the external Agent. Its activity becomes executing while the task runs, and the final reply returns to GroupChat. Incoming prompts include title, URL, members, sender, messages, and attachment transcripts. Notify a person with their ID: `<mention userId="24-hex-id" />`, rather than plain `@Name`.
+Type `@` in the composer and select the external Agent. Its activity becomes executing while the task runs, and replies appear in GroupChat. Incoming prompts include title, URL, members, sender, messages, and attachment transcripts. Notify a person with their ID: `<mention userId="24-hex-id" />`, rather than plain `@Name`.
 
 - **Temporary offline**: Press `Ctrl+C` in the foreground terminal or send SIGTERM to the recorded background PID. Presence becomes **Disconnected**. Restart loads existing credentials and session mappings.
 - **Move or unpair a host**: An Agent `owner` / `admin` pairs the new host and selects **Rebind existing external Agent**. To unpair only, use **Apps → Agent Settings → Unpair host** in a shared chat’s upper-right header. Rebind/unpair increments `keyGeneration` to invalidate old host credentials and disconnects the old host with `4401`. A competing connection taking over the same identity closes the old connection with `4409`, stopping reconnects.
@@ -141,7 +143,7 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 - **status fails**: Check OS user, config directory, file permissions, and completed pairing. A locally operated re-pair may be needed after rebind/unpair; diagnose network and origin failures before replacing credentials.
 - **Chat stays red Disconnected**: Inspect the daemon, `/tmp/nia-workbuddy.log`, saved Server, and chat Agent identity. Check for another process using the credentials. Close code `4409` means another connection took over.
 - **CodeBuddy login or startup fails**: Run the WorkBuddy desktop app or CodeBuddy CLI under the same OS user, sign in, and verify Node version and binary selection. CodeBuddy sign-in and Nia pairing are separate.
-- **Execution without a reply**: Inspect CodeBuddy results and publication errors. Check cancellation, session rotation, and final text. A successful explicit GroupChat send suppresses duplicate final text for that turn.
+- **Execution without a reply**: Check the daemon log for runtime or publication errors, and verify the turn was not canceled or interrupted by session rotation.
 
 ## 3. CLI, Environment & Package Exports
 
@@ -190,8 +192,8 @@ For embedding, pass `createWorkBuddyRunner(options)` to core `runSessionDaemon`,
 
 ### 2. GroupChat tools, messages, and native mentions
 
-- `nia_group_chat_send_message({ content })` publishes Markdown or Rich HTML to the current GroupChat for progress or questions. A successful send suppresses that turn’s final reply publication.
-- `nia_group_chat_history({ limit?, offset? })` paginates history; `limit` defaults to 50 in 1..100, and `offset` defaults to 0 and must be non-negative. The host supplies the Nia session; the model does not choose a chat ID.
+- `send_message({ content })` publishes Markdown or Rich HTML to the current GroupChat for progress or questions. All replies require an explicit send; turn-end text stays private.
+- `chat_history({ limit?, offset? })` paginates history; `limit` defaults to 50 in 1..100, and `offset` defaults to 0 and must be non-negative. The host supplies the Nia session; the model does not choose a chat ID.
 - GroupChat tools belong to the active turn. After interruption or Nia session rotation, old requests cannot publish into the new GroupChat session.
 
 Incoming prompts list `Members: Alice (<userId>), ...`; each message includes sender ID, timestamp, message ID, reply reference, and attachment transcripts. Generic headers may appear as `[chat:<chatId>] Alice (<userId>): ...`, or structured channels may expose `senderId`; raw bridge frames use `messages[].authorId`. Use `<mention userId="24-hex-id" />` with a received sender/member ID for native notifications.

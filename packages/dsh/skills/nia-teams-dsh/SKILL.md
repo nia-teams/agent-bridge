@@ -29,10 +29,12 @@ Connect local DeepSeek Harness (DSH) into Nia Teams as an Agent that communicate
 - Start the Harness host with `nohup dsh web > /tmp/nia-dsh.log 2>&1 &`, wait 2 seconds, read `/tmp/nia-dsh.log`, check `pgrep -af '[d]sh.*web'`, and verify connected/idle presence and a GroupChat reply in Nia Teams.
 - Optional plugin settings (`cwd`, `agentPreset`, `agentOptions`, `sessionAllowTools`) live under `id: nia-teams` in the profile's `cordis.patch.yml`.
 
+- Invite-code onboarding: `npx --prefix ~/.dsh/profiles/web nia-dsh connect --invite-code <code> --user-name <user> --agent-name <agent>`; names are required for first registration. Reuse same-server credentials. Start `dsh web` separately.
+
 ## GroupChat Replies & Mentions
 
-- Final replies publish at turn end unless `nia_group_chat_send_message({ content })` already sent a message during that turn.
-- Use `nia_group_chat_send_message({ content })` for mid-turn progress and `nia_group_chat_history({ limit?, offset? })` (limit `1..100`, offset `>= 0`) for earlier context.
+- `send_message({ content })` is the sole outbound message channel; every reply requires an explicit call, and turn-end text remains private.
+- Use `send_message({ content })` for mid-turn progress and `chat_history({ limit?, offset? })` (limit `1..100`, offset `>= 0`) for earlier context.
 - Read sender/member IDs from incoming headers (`messages[].authorId` in raw payloads) and format mentions as `<mention userId="<24-hex-id>" />` instead of plain `@Name`.
 
 ## Trust & Approvals

@@ -1,4 +1,4 @@
-# Nia Teams Agent Bridge v1 Specification
+# Nia Teams Agent Bridge v2 Specification
 
 Wire-level contract between Nia Teams (`https://nia-teams.com`) and external Agent hosts implemented by `@nia-teams/agent-bridge-core` (`src/pairing.ts`, `src/bridge-client.ts`, and `src/types.ts`). `teamId`, `groupChatId`, and Nia `sessionId` are 24-character hex identifiers (`teamId` identifies the paired Agent).
 
@@ -208,7 +208,7 @@ Core defaults to `~/.config/nia-teams-agent-bridge`; an explicit `configDir` ove
 
 `saveCredentials` and `loadCredentials` reject the filesystem root itself as `configDir`; for a path with more than one component, only an existing first component in the case-sensitive set `var`, `tmp`, `etc`, `home`, `Users`, `workspace` can be resolved as the base, and only when it is a non-symlink directory or a symlink with verifiable POSIX `lstat.uid === 0` whose `realpath` target is also a root-owned directory; otherwise traversal starts at the filesystem root, with every subsequent component checked using `lstat` and every symlink rejected. `HOME`/`TMPDIR` never define an exemption. `saveCredentials` creates missing segments individually, requires the requested directory itself to be a regular directory, sets its POSIX mode to `0700`, rejects an existing symlink or non-regular `credentials.json` before writing and immediately before atomic rename, and writes the temporary file exclusively with mode `0600`; `loadCredentials` applies the same path checks without creating or chmodding anything. These portable path checks do not replace OS-level isolation against concurrent directory replacement by an attacker with write access to an ancestor. `loadCredentials` checks `lstat(path).isFile()` (which rejects symlinks and non-regular files) and requires no POSIX group/other permission bits (`(mode & 0o077) === 0`), validates all fields, and verifies that `publicKeyPem` matches the public key derived from `privateKeyPem`.
 
-## 2. WebSocket Transport (`/ws/agent-bridge`, `protocolVersion: 1`)
+## 2. WebSocket Transport (`/ws/agent-bridge`, `protocolVersion: 2`)
 
 ### 2.1 Handshake & Heartbeat
 
@@ -217,7 +217,7 @@ Immediately after opening `gatewayUrl`, the client sends:
 ```json
 {
   "type": "hello",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "teamId": "65f000000000000000000002",
   "lease": "<single-use lease>",
   "hostLabel": "custom-agent@build-server"
@@ -229,7 +229,12 @@ First server frame (`ReadyFrame`):
 ```json
 {
   "type": "ready",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
+  "systemPrompt": "Server collaboration policy",
+  "tools": [
+    { "name": "send_message", "description": "Publish a reply", "inputSchema": { "type": "object", "properties": { "content": { "type": "string" } }, "required": ["content"] } },
+    { "name": "chat_history", "description": "Read earlier messages", "inputSchema": { "type": "object" } }
+  ],
   "connectionGeneration": "<opaque connection generation>",
   "agent": {
     "teamId": "65f000000000000000000002",
@@ -241,12 +246,14 @@ First server frame (`ReadyFrame`):
 }
 ```
 
-The client validates `protocolVersion === 1`, `agent.teamId === credentials.teamId`, `issuer === credentials.issuer`, and initializes the RS256 confirmation verifier with `${credentials.serverUrl}/oauth2/jwks`.
+`BridgeClient.getContract()` exposes the latest `systemPrompt` and `tools`. The server owns collaboration policy, Rich HTML instructions, tool descriptions/schemas, and prompt formatting.
 
-Frames are UTF-8 JSON text objects up to 512 KiB (`512 * 1024` bytes). Handshake and `ready` each enforce a 15s timeout. Once ready, the client sends a heartbeat every 20s and closes the socket if no valid version-1 frame arrives within 60s:
+The client validates `protocolVersion === 2`, `agent.teamId === credentials.teamId`, `issuer === credentials.issuer`, and initializes the RS256 confirmation verifier with `${credentials.serverUrl}/oauth2/jwks`.
+
+Frames are UTF-8 JSON text objects up to 512 KiB (`512 * 1024` bytes). Handshake and `ready` each enforce a 15s timeout. Once ready, the client sends a heartbeat every 20s and closes the socket if no valid version-2 frame arrives within 60s:
 
 ```json
-{ "type": "heartbeat", "protocolVersion": 1, "at": 1793664000000 }
+{ "type": "heartbeat", "protocolVersion": 2, "at": 1793664000000 }
 ```
 
 | Close code | Meaning | Client behavior |
@@ -273,7 +280,7 @@ All push frames share `PushBase`:
 
 ```ts
 interface PushBase {
-  protocolVersion: 1;
+  protocolVersion: 2;
   deliveryId: string;
   groupChatId: string;   // 24-hex
   sessionId: string;     // 24-hex Nia session ID
@@ -286,6 +293,7 @@ interface PushBase {
 ```ts
 interface ThreadMessage extends PushBase {
   type: 'thread.message';
+  prompt?: string; // server-formatted collaboration input
   reason: 'message' | 'joined';
   groupChat: {
     title: string;
@@ -310,6 +318,8 @@ interface ThreadMessage extends PushBase {
   }>;
 }
 ```
+
+Forward nonempty `prompt` verbatim through `resolveThreadPrompt(frame)`, including resumed sessions; absent or empty prompts use `formatThreadMessage(frame)`. A silent turn may receive another `thread.message` whose prompt contains `<system-reminder>`. Reminder policy belongs to the server.
 
 ### 3.2 `card.action`
 
@@ -341,7 +351,7 @@ When all registered push handlers for an inbound frame resolve, the client sends
 ```json
 {
   "type": "ack",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "sessionId": "65f000000000000000000003",
   "deliveryId": "<deliveryId>"
 }
@@ -358,7 +368,7 @@ Request (`rpc.request`, default 30s timeout):
 ```json
 {
   "type": "rpc.request",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "<UUID>",
   "method": "group_chat.history",
   "params": { "sessionId": "65f000000000000000000003", "limit": 50, "offset": 0 }
@@ -370,7 +380,7 @@ Success response (`rpc.response`):
 ```json
 {
   "type": "rpc.response",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "<same UUID>",
   "ok": true,
   "result": { "messages": [] }
@@ -382,12 +392,14 @@ Error response (`rpc.response`, raises `BridgeRpcError(code, message, retryable)
 ```json
 {
   "type": "rpc.response",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "requestId": "<same UUID>",
   "ok": false,
   "error": { "code": "invalid_request", "message": "Invalid parameters", "retryable": false }
 }
 ```
+
+Turn completion sends `thread.activity` with `state: 'idle'` and the processed `deliveryId`, without reply content. Model-facing `send_message` and `chat_history` map to transport RPCs `group_chat.send_message` and `group_chat.history`. Terminal output and SDK results are not publications.
 
 ### 4.2 RPC Methods
 
@@ -397,7 +409,7 @@ Error response (`rpc.response`, raises `BridgeRpcError(code, message, retryable)
 | `group_chat.history` | `sessionId`, `limit: number` (`1..100`), `offset: number` (`>= 0`) | Read earlier GroupChat messages |
 | `card.upsert` | `sessionId`, `toolCallId`, `cardId`, `title`, `subtitle`, `description?`, `actionLabel: "允许执行"`, `verifyToolName`, `verifyArguments` | Create or update a pending TaskBar confirmation card |
 | `card.cancel` | `sessionId`, `cardId: string` | Cancel a pending TaskBar card |
-| `thread.activity` | `sessionId`, `state: "executing" \| "waiting" \| "idle"`, `label?: string`, `errorMessage?: string` | Update live Agent activity status in the GroupChat |
+| `thread.activity` | `sessionId`, `state: "executing" \| "waiting" \| "idle"`, `label?: string`, `errorMessage?: string`, `deliveryId?: string` | Update live Agent activity status in the GroupChat |
 
 Permission card identifiers use the namespace and request binding defined below.
 

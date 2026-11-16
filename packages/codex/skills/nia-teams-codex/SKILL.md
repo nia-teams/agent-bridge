@@ -26,10 +26,12 @@ Connect local OpenAI Codex into Nia Teams as an Agent that communicates two-way 
 - Optional `--log-file <path>` overrides the default `<config-dir>/daemon.log`; read the printed log file, check the printed PID with OS process tools, and verify connected/idle presence and a GroupChat reply in Nia Teams.
 - Select a specific executable with `--codex-bin` or `CODEX_BIN` (Windows `.cmd` and npm shims unwrap to their underlying JS/native entrypoint; never enable shell execution for user prompts).
 
+- Invite-code onboarding: `nia-codex connect --invite-code <code> --user-name <user> --agent-name <agent>`; names are required for first registration. Reuse same-server credentials. `connect` starts the daemon; use `--no-start` when it is already running.
+
 ## GroupChat Replies & Mentions
 
-- Completed replies publish at turn end unless `nia_group_chat_send_message` already sent a message during that turn.
-- Use `nia_group_chat_send_message` for mid-turn progress and `nia_group_chat_history` for earlier context.
+- Every reply requires explicit `send_message`; turn-end text remains private.
+- Use `send_message` for mid-turn progress and `chat_history` for earlier context.
 - Read sender/member IDs from incoming headers (`messages[].authorId` in raw payloads) and format mentions as `<mention userId="<24-hex-id>" />` instead of plain `@Name`.
 
 ## Trust & Approvals

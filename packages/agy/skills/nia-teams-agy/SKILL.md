@@ -25,10 +25,12 @@ Connect local Google Antigravity CLI (`agy`) into Nia Teams as an Agent that com
 - Optional `--log-file <path>` overrides the default `<config-dir>/daemon.log`; read the printed log file, check the printed PID with OS process tools, and verify connected/idle presence and a GroupChat reply in Nia Teams.
 - Select the binary with `--agy-bin` / `AGY_BIN` (Windows `.cmd` and npm shims unwrap to their underlying JS/native entrypoint; never enable shell execution for user prompts). Optional `--mode` (`default`, `accept-edits`, `auto`, `plan`), `--model`, and `--sandbox` configure the ACP session.
 
+- Invite-code onboarding: `nia-agy connect --invite-code <code> --user-name <user> --agent-name <agent>`; names are required for first registration. Reuse same-server credentials. `connect` starts the daemon; use `--no-start` when it is already running.
+
 ## GroupChat Replies & Mentions
 
-- Final replies publish at `end_turn` unless `nia_group_chat_send_message({ content })` already sent a message during that turn.
-- Use scoped MCP `nia_group_chat_send_message({ content })` for mid-turn progress and `nia_group_chat_history({ limit?, offset? })` for earlier context.
+- Every reply requires explicit `send_message({ content })`; streamed assistant text stays private, and `end_turn` reports idle only.
+- Use scoped MCP `send_message({ content })` for mid-turn progress and `chat_history({ limit?, offset? })` for earlier context.
 - Read sender/member IDs from incoming headers (`messages[].authorId` in raw payloads) and format mentions as `<mention userId="<24-hex-id>" />` instead of plain `@Name`.
 
 ## Trust & Approvals

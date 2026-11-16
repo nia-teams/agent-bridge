@@ -10,6 +10,7 @@ export function apply(ctx) {
         follows.push(message);
         void (async () => {
           await ctx.parallel('session/event', agent.session, { type: 'turn/start', data: { turn: 1 } });
+          await tools.get('send_message').definition.execute({ content: 'Loaded Agent says hello' }, { agent, callId: 'loader-send' });
           await ctx.parallel('session/event', agent.session, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: 'Loaded Agent says hello' }] } } });
           await ctx.parallel('session/event', agent.session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } });
         })();

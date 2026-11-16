@@ -12,6 +12,8 @@ nia-agy start --cwd "." --daemon
 
 AI coding agents: load [skills/nia-teams-agy/SKILL.md](./skills/nia-teams-agy/SKILL.md); installed path: `node_modules/@nia-teams/agy-bridge/skills/nia-teams-agy/SKILL.md`.
 
+For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+
 ## 1. Product Overview & Collaboration Model
 
 The bridge drives Google Antigravity CLI through newline-delimited JSON-RPC 2.0 over `agy acp` stdio. One daemon retains one ACP child with a separate session per GroupChat. Teammates submit tasks, follow live activity, and approve tool execution through TaskBar.
@@ -46,7 +48,7 @@ Run the installed agy in a local interactive terminal under the same OS user to 
 
 Executable precedence is `--agy-bin`, `AGY_BIN`, `agy` on PATH, then `~/.local/bin/agy`, `~/.antigravity/bin/agy`, `/opt/homebrew/bin/agy`, and `/usr/local/bin/agy`. An invalid explicit selection fails rather than choosing an unrequested installation.
 
-The daemon starts `<agy> acp`; stdout/stdin carry newline-delimited JSON-RPC 2.0 and stderr carries diagnostics to the terminal or daemon log. Initialization negotiates `protocolVersion: 1`. GroupChat MCP tools arrive in the session descriptor, without adding MCP configuration to the user's project.
+The daemon starts `<agy> acp`; stdout/stdin carry newline-delimited JSON-RPC 2.0 and stderr carries diagnostics to the terminal or daemon log. ACP initialization negotiates `protocolVersion: 1`. GroupChat MCP tools arrive in the session descriptor, without adding MCP configuration to the user's project.
 
 ### Step 2: Pair the host and create an Agent in the browser
 
@@ -114,7 +116,7 @@ Core `SessionHost` / `ThreadMapStore` stores each chat's ACP `sessionId` in `~/.
 
 New sessions append GroupChat collaboration instructions. Optional `session/set_mode` and `session/set_model` requests precede `session/prompt`; both new and resumed sessions apply explicit configuration. Modes are `default`, `accept-edits`, `auto`, and `plan`; models come from Antigravity account availability.
 
-Text `agent_message_chunk` updates are concatenated in arrival order. Thought updates only change activity; `tool_call` / `tool_call_update` display the running tool. The final reply publishes when `session/prompt` returns `stopReason: end_turn`; cancellation, failure, or incomplete stop reasons do not publish accumulated fragments.
+Streamed output stays on the host. Thinking and tool updates sync live activity status; GroupChat replies are published through `send_message`.
 
 SessionHost serializes turns within a GroupChat while different ACP sessions can run concurrently in the same child. Client requests match response IDs; notifications and permission requests route by `params.sessionId`. Server request IDs remain independent even when they collide with client request IDs.
 
@@ -132,7 +134,7 @@ Watch the activity strip above the composer: red **Disconnected** changes to **I
 
 ### Step 5: Mention the Agent and manage its lifecycle
 
-Type `@` in the composer and select the external Agent. Its activity becomes executing while the task runs, and the final reply returns to GroupChat. Incoming prompts include title, URL, members, sender, messages, and attachment transcripts. Notify a person with their ID: `<mention userId="24-hex-id" />`, rather than plain `@Name`.
+Type `@` in the composer and select the external Agent. Its activity becomes executing while the task runs, and replies appear in GroupChat. Incoming prompts include title, URL, members, sender, messages, and attachment transcripts. Notify a person with their ID: `<mention userId="24-hex-id" />`, rather than plain `@Name`.
 
 - **Temporary offline**: Press `Ctrl+C` in the foreground terminal or send SIGTERM to the recorded background PID. Presence becomes **Disconnected**. Restart loads existing credentials and session mappings.
 - **Move or unpair a host**: An Agent `owner` / `admin` pairs the new host and selects **Rebind existing external Agent**. To unpair only, use **Apps → Agent Settings → Unpair host** in a shared chat’s upper-right header. Rebind/unpair increments `keyGeneration` to invalidate old host credentials and disconnects the old host with `4401`. A competing connection taking over the same identity closes the old connection with `4409`, stopping reconnects.
@@ -144,7 +146,7 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 - **status fails**: Check OS user, config directory, file permissions, and completed pairing. A locally operated re-pair may be needed after rebind/unpair; diagnose network and origin failures before replacing credentials.
 - **Chat stays red Disconnected**: Inspect the daemon, `/tmp/nia-agy.log`, saved Server, and chat Agent identity. Check for another process using the credentials. Close code `4409` means another connection took over.
 - **Antigravity login or startup fails**: Run the Google Antigravity CLI (`agy`) under the same OS user, sign in, and verify Node version and binary selection. Antigravity sign-in and Nia pairing are separate.
-- **Execution without a reply**: Inspect Antigravity results and publication errors. Check cancellation, session rotation, and final text. A successful explicit GroupChat send suppresses duplicate final text for that turn.
+- **Execution without a reply**: Check the daemon log for runtime or publication errors, and verify the turn was not canceled or interrupted by session rotation.
 
 ## 3. CLI, Environment & Package Exports
 
@@ -201,8 +203,8 @@ ACP replies contain `outcome: { outcome: "selected", optionId }`. Approval selec
 
 ### 2. GroupChat tools, messages, and native mentions
 
-- `nia_group_chat_send_message({ content })` publishes Markdown or Rich HTML to the current GroupChat for progress or questions. A successful send suppresses that turn’s final reply publication.
-- `nia_group_chat_history({ limit?, offset? })` paginates history; `limit` defaults to 50 in 1..100, and `offset` defaults to 0 and must be non-negative. The host supplies the Nia session; the model does not choose a chat ID.
+- `send_message({ content })` publishes Markdown or Rich HTML to the current GroupChat for progress or questions. All replies require an explicit send; turn-end text stays private.
+- `chat_history({ limit?, offset? })` paginates history; `limit` defaults to 50 in 1..100, and `offset` defaults to 0 and must be non-negative. The host supplies the Nia session; the model does not choose a chat ID.
 - GroupChat tools belong to the active turn. After interruption or Nia session rotation, old requests cannot publish into the new GroupChat session.
 
 The bundled MCP service uses a temporary per-turn credential to access the current GroupChat; the credential expires when the turn ends. MCP helpers do not read the Nia Teams private key. See the [protocol specification](./docs/SPECIFICATION.md) for messages and request scope.

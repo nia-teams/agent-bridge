@@ -48,7 +48,7 @@ test('desktop cookies refresh at ready and each turn; only child env gets the ne
   process.env.DOUBAO_HEADLESS_COOKIE = 'sessionid=parent-must-not-change';
   const create = await loadRunner('darwin');
   const runner = create({ cwd: dir, platform: 'work' }); const sessions = [];
-  const turn = resume => runner({ prompt: 'hello', resume, signal: new AbortController().signal, session: async id => sessions.push(id) });
+  const turn = resume => runner({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'hello', resume, signal: new AbortController().signal, session: async id => sessions.push(id) });
   await runner.ready(); assert.equal(fixture.requests.length, 1);
   fixture.cookies[0].value = 'refreshed-secret-one';
   await turn(); assert.equal(fixture.requests.length, 2);
@@ -67,12 +67,12 @@ test('logout/login target before next turn prevents submitting any task and is n
   const { fixture, dir, calls } = await setup(t);
   const create = await loadRunner('darwin'); const runner = create({ cwd: dir, platform: 'work' }); await runner.ready();
   fixture.login = true;
-  await assert.rejects(runner({ prompt: 'hi', signal: new AbortController().signal, session: async () => {} }), /Sign in inside DoubaoWork.app/);
+  await assert.rejects(runner({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'hi', signal: new AbortController().signal, session: async () => {} }), /Sign in inside DoubaoWork.app/);
   assert.equal((await calls()).some(c => c.args.includes('create')), false);
 });
 test('full-auto consent is programmatic per invocation; default never receives FullAccess', async t => {
   const { dir, calls } = await setup(t);
-  const create = await loadRunner('darwin'); const context = { prompt: 'hi', signal: new AbortController().signal, session: async () => {} };
+  const create = await loadRunner('darwin'); const context = { systemPrompt: 'Server policy', send: async () => {}, prompt: 'hi', signal: new AbortController().signal, session: async () => {} };
   await create({ cwd: dir, platform: 'work' })(context);
   await create({ cwd: dir, platform: 'work', fullAuto: true })(context);
   const tasks = (await calls()).filter(c => c.args.includes('create'));

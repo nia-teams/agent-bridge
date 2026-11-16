@@ -1,6 +1,6 @@
 import { query, createSdkMcpServer, tool, type Options } from '@tencent-ai/agent-sdk';
 import { z } from 'zod';
-import { consumeSdkQuery, GROUP_CHAT_INSTRUCTIONS, findExecutable, type TurnRunner } from '@nia-teams/agent-bridge-core';
+import { consumeSdkQuery, findTool, findExecutable, type TurnRunner } from '@nia-teams/agent-bridge-core';
 import { homedir, platform } from 'node:os';
 import { execFile } from 'node:child_process';
 import { constants, existsSync } from 'node:fs';
@@ -178,19 +178,19 @@ export function createWorkBuddyRunner(options: WorkBuddyOptions): TurnRunner {
     const abort = () => controller.abort(context.signal.reason);
     context.signal.addEventListener('abort', abort, { once: true });
     if (context.signal.aborted) abort();
-    const server = createSdkMcpServer({ name: 'nia', version: '0.1.0', tools: [
-      tool('nia_group_chat_send_message', 'Send an interim update to this GroupChat', { content: z.string().trim().min(1) }, async ({ content }) => { await context.send(content); return { content: [{ type: 'text', text: 'Sent' }] }; }),
-      tool('nia_group_chat_history', 'Read older messages in this GroupChat', { limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() }, async ({ limit, offset }) => ({ content: [{ type: 'text', text: JSON.stringify(await context.history(limit, offset)) }] })),
+    const server = createSdkMcpServer({ name: 'nia', version: '0.2.0', tools: [
+      tool('send_message', findTool(context.tools, 'send_message').description, { content: z.string().trim().min(1) }, async ({ content }) => { await context.send(content); return { content: [{ type: 'text', text: '消息已发布到聊天' }] }; }),
+      tool('chat_history', findTool(context.tools, 'chat_history').description, { limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() }, async ({ limit, offset }) => ({ content: [{ type: 'text', text: JSON.stringify(await context.history(limit, offset)) }] })),
     ] });
     try {
       return await consumeSdkQuery(query({ prompt: context.prompt, options: {
         pathToCodebuddyCode: binary, env, cwd: options.cwd, model: options.model, resume: context.resume,
         abortController: controller, permissionMode: options.fullAuto ? 'bypassPermissions' : 'default', allowDangerouslySkipPermissions: Boolean(options.fullAuto),
-        settingSources: ['user', 'project', 'local'], systemPrompt: { append: GROUP_CHAT_INSTRUCTIONS },
+        settingSources: ['user', 'project', 'local'], systemPrompt: { append: context.systemPrompt },
         mcpServers: { nia: server },
         canUseTool: async (name, input, detail) => {
           // These two scoped collaboration tools need no separate TaskBar approval.
-          if (name === 'mcp__nia__nia_group_chat_send_message' || name === 'mcp__nia__nia_group_chat_history') return { behavior: 'allow', updatedInput: input };
+          if (name === 'mcp__nia__send_message' || name === 'mcp__nia__chat_history') return { behavior: 'allow', updatedInput: input };
           const result = await context.permission(name, input, detail.signal);
           return result.behavior === 'allow' ? { behavior: 'allow', updatedInput: result.updatedInput ?? input } : { behavior: 'deny', message: result.message ?? 'Denied' };
         },

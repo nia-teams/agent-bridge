@@ -23,10 +23,12 @@ async function request(m) {
       if (process.env.AGY_TEST_INIT === 'wrong-version') return result(m.id, { protocolVersion: 2 });
       return result(m.id, { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: true } }, agentInfo: { name: 'mock-acp' }, authMethods: [] });
     case 'session/new': {
+      if (typeof p.systemPromptAppend !== 'string' || !p.systemPromptAppend) throw new Error('Missing server system prompt');
       if (process.env.AGY_TEST_NEW === 'missing-id') return result(m.id, {});
       const sid = randomUUID(); sessions.set(sid, p); return result(m.id, { sessionId: sid, models: { availableModels: [] }, modes: { currentModeId: 'default' } });
     }
     case 'session/resume':
+      if (typeof p.systemPromptAppend !== 'string' || !p.systemPromptAppend) throw new Error('Missing resumed server system prompt');
       if (process.env.AGY_TEST_RESUME === 'crash') process.exit(7);
       if (process.env.AGY_TEST_RESUME === 'error' || !sessions.has(p.sessionId)) return send({ id: m.id, error: { code: -32002, message: 'Session missing' } });
       sessions.set(p.sessionId, p); return result(m.id, { sessionId: process.env.AGY_TEST_RESUME === 'mismatch' ? 'wrong' : p.sessionId });
@@ -42,7 +44,7 @@ async function request(m) {
       update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'activity', name: 'read_file', title: 'Read project', status: 'in_progress' });
       update('foreign-session', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'DO NOT PUBLISH' } });
       if (text.includes('crash child')) process.exit(8);
-      if (text.includes('oversized')) { update(sid, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'x'.repeat(481 * 1024) } }); return; }
+      if (text.includes('oversized')) { update(sid, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'x'.repeat(481 * 1024) } }); return result(m.id, { stopReason: 'end_turn' }); }
       if (text.includes('hold')) { held.set(sid, m.id); return; }
       if (text.includes('permission')) {
         // Deliberately collide with a client request ID; bidirectional IDs are separate.
@@ -60,9 +62,9 @@ async function request(m) {
         try {
           await client.connect(transport);
           log({ kind: 'tools', result: await client.listTools() });
-          log({ kind: 'history', result: await client.callTool({ name: 'nia_group_chat_history', arguments: { limit: 3 } }) });
+          log({ kind: 'history', result: await client.callTool({ name: 'chat_history', arguments: { limit: 3 } }) });
           const content = text.includes('second-tools') ? 'Second scoped update' : 'ACP interim';
-          log({ kind: 'send', result: await client.callTool({ name: 'nia_group_chat_send_message', arguments: { content } }) });
+          log({ kind: 'send', result: await client.callTool({ name: 'send_message', arguments: { content } }) });
         } finally { await client.close(); }
         return finish(m.id, sid, 'Internal status only');
       }

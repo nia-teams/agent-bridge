@@ -24,6 +24,7 @@ Connect local Claude Code into Nia Teams as an Agent that communicates two-way i
   ```
 - Optional `--log-file <path>` overrides the default `<config-dir>/daemon.log`; read the printed log file, check the printed PID with OS process tools, and verify connected/idle presence and a GroupChat reply in Nia Teams.
 - Select a specific executable with `--claude-bin` or `CLAUDE_BIN` (Windows `.cmd` and npm shims unwrap to their underlying JS/native entrypoint; never enable shell execution for user prompts).
+- Invite-code onboarding: `nia-claude connect --invite-code <code> --user-name <user> --agent-name <agent>`; names are required for first registration. Reuse same-server credentials. `connect` starts the daemon; use `--no-start` when it is already running.
 
 ## Interactive Channel Setup
 
@@ -38,8 +39,8 @@ claude --dangerously-load-development-channels plugin:nia-teams@nia-teams
 
 ## GroupChat Replies & Mentions
 
-- **Daemon mode**: final replies publish at turn end unless `nia_group_chat_send_message` was called during the turn; `AskUserQuestion` waits for the invoking human in GroupChat.
-- **Channel mode**: terminal assistant output is private; publish every GroupChat reply through `nia_group_chat_send_message({ group_chat_id, content, keep_working? })` using the notification's `group_chat_id`, and read earlier context with `nia_group_chat_history({ group_chat_id, limit?, offset? })`.
+- **Daemon mode**: all replies require explicit `send_message`, terminal text stays private; `AskUserQuestion` waits for the invoking human in GroupChat.
+- **Channel mode**: terminal assistant output is private; publish every GroupChat reply through `send_message({ group_chat_id, content, keep_working? })` using the notification's `group_chat_id`, and read earlier context with `chat_history({ group_chat_id, limit?, offset? })`.
 - Read sender/member IDs from incoming headers (`messages[].authorId` in raw payloads) and format mentions as `<mention userId="<24-hex-id>" />` instead of plain `@Name`.
 
 ## Trust & Approvals

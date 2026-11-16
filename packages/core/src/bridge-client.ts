@@ -4,7 +4,7 @@ import { createWorkloadOidcVerifier } from '@nia-teams/mcp-sdk/auth';
 import type { ExpectedHumanActionContext, WorkloadOidcVerifier } from '@nia-teams/mcp-sdk/auth';
 import { acquireLease } from './pairing.js';
 import { stableExternalAgentThreadId } from './crypto.js';
-import type { Credentials, ThreadMessage, CardAction, ThreadCancel, PushFrame, ReadyFrame, RpcMethod } from './types.js';
+import type { BridgeContract, Credentials, ThreadMessage, CardAction, ThreadCancel, PushFrame, ReadyFrame, RpcMethod } from './types.js';
 
 type Handler<T> = (frame: T) => void | Promise<void>;
 interface PendingRpc { resolve: (result: Record<string, unknown>) => void; reject: (error: Error) => void }
@@ -18,11 +18,11 @@ export class BridgeRpcError extends Error {
 }
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 function validPush(value: Record<string, unknown>, teamId: string): value is Record<string, unknown> & PushFrame {
-  if (value.protocolVersion !== 1 || typeof value.deliveryId !== 'string' || !value.deliveryId || typeof value.sessionId !== 'string' || !/^[a-f\d]{24}$/i.test(value.sessionId)
+  if (value.protocolVersion !== 2 || typeof value.deliveryId !== 'string' || !value.deliveryId || typeof value.sessionId !== 'string' || !/^[a-f\d]{24}$/i.test(value.sessionId)
     || typeof value.groupChatId !== 'string' || !/^[a-f\d]{24}$/i.test(value.groupChatId)
     || value.agentThreadId !== stableExternalAgentThreadId(value.groupChatId, teamId)) return false;
   switch (value.type) {
-    case 'thread.message': return (value.reason === 'message' || value.reason === 'joined') && typeof value.triggerMessageId === 'string'
+    case 'thread.message': return (value.prompt === undefined || typeof value.prompt === 'string') && (value.reason === 'message' || value.reason === 'joined') && typeof value.triggerMessageId === 'string'
       && record(value.groupChat) && typeof value.groupChat.title === 'string' && typeof value.groupChat.url === 'string'
       && Array.isArray(value.groupChat.members) && value.groupChat.members.every(m => record(m) && typeof m.name === 'string' && typeof m.id === 'string')
       && (value.invokedBy === undefined || (record(value.invokedBy) && typeof value.invokedBy.userName === 'string' && (value.invokedBy.userId === undefined || typeof value.invokedBy.userId === 'string')))
@@ -38,6 +38,8 @@ function validPush(value: Record<string, unknown>, teamId: string): value is Rec
 
 /** One host connection. Call start after installing push handlers; close is terminal. */
 export class BridgeClient {
+  private contract?: BridgeContract;
+  getContract(): BridgeContract | undefined { return this.contract; }
   private socket?: WebSocket;
   private verifier?: WorkloadOidcVerifier;
   private readonly lifetime = new AbortController();
@@ -98,25 +100,28 @@ export class BridgeClient {
       const stop = (): void => { socket.terminate(); };
       this.lifetime.signal.addEventListener('abort', stop, { once: true });
       socket.on('open', () => {
-        try { this.send({ type: 'hello', protocolVersion: 1, teamId: this.credentials.teamId, lease: lease.lease, hostLabel: this.credentials.hostLabel }); }
+        try { this.send({ type: 'hello', protocolVersion: 2, teamId: this.credentials.teamId, lease: lease.lease, hostLabel: this.credentials.hostLabel }); }
         catch (error) { reject(error); socket.terminate(); }
       });
       socket.on('message', (data, binary) => {
         if (binary) { socket.close(4400, 'binary frames unsupported'); return; }
         let value: unknown;
         try { value = JSON.parse(data.toString()); } catch { socket.close(4400, 'invalid JSON'); return; }
-        if (!record(value) || value.protocolVersion !== 1) { socket.close(4400, 'invalid frame'); return; }
+        if (!record(value) || value.protocolVersion !== 2) { socket.close(4400, 'invalid frame'); return; }
         this.lastReceived = Date.now();
         if (!established) {
           const frame = value as unknown as ReadyFrame;
-          if (frame.type !== 'ready' || frame.agent?.teamId !== this.credentials.teamId || frame.issuer !== this.credentials.issuer || typeof frame.connectionGeneration !== 'string') {
+          if (frame.type !== 'ready' || frame.agent?.teamId !== this.credentials.teamId || frame.issuer !== this.credentials.issuer || typeof frame.connectionGeneration !== 'string'
+            || typeof frame.systemPrompt !== 'string' || !frame.systemPrompt.trim() || !Array.isArray(frame.tools)
+            || !frame.tools.every(t => record(t) && typeof t.name === 'string' && t.name.length > 0 && typeof t.description === 'string' && record(t.inputSchema))) {
             socket.close(4401, 'invalid ready'); return;
           }
+          this.contract = { systemPrompt: frame.systemPrompt, tools: frame.tools };
           this.verifier = createWorkloadOidcVerifier({ issuer: frame.issuer, jwksUrl: new URL('/oauth2/jwks', this.credentials.serverUrl).href });
           established = true; this.ready = true; this.attempt = 0; clearTimeout(timer);
           this.heartbeat = setInterval(() => {
             if (Date.now() - this.lastReceived > (this.options.idleTimeoutMs ?? 60_000)) { socket.terminate(); return; }
-            try { this.send({ type: 'heartbeat', protocolVersion: 1, at: Date.now() }); }
+            try { this.send({ type: 'heartbeat', protocolVersion: 2, at: Date.now() }); }
             catch (error) { this.report(error); socket.terminate(); }
           }, this.options.heartbeatMs ?? 20_000);
           resolve();
@@ -184,7 +189,7 @@ export class BridgeClient {
       await task;
     }
     // Reply only to the delivering socket. Reconnect replay gets its own ack.
-    if (this.socket === socket && this.ready) this.send({ type: 'ack', protocolVersion: 1, sessionId: frame.sessionId, deliveryId: frame.deliveryId });
+    if (this.socket === socket && this.ready) this.send({ type: 'ack', protocolVersion: 2, sessionId: frame.sessionId, deliveryId: frame.deliveryId });
   }
   private waitUntilReady(signal?: AbortSignal): Promise<void> {
     if (this.lifetime.signal.aborted) return Promise.reject(this.lifetime.signal.reason);
@@ -221,7 +226,7 @@ export class BridgeClient {
       const timer = setTimeout(() => finish(new Error('Agent Bridge RPC timeout')), this.options.rpcTimeoutMs ?? 30_000);
       this.pending.set(requestId, { resolve: result => finish(undefined, result), reject: error => finish(error) });
       signal?.addEventListener('abort', aborted, { once: true });
-      try { this.send({ type: 'rpc.request', protocolVersion: 1, requestId, method, params }); }
+      try { this.send({ type: 'rpc.request', protocolVersion: 2, requestId, method, params }); }
       catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
     });
   }

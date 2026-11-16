@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BridgeClient, NiaTeamsHost } from '../dist/index.js';
-import { fixture, hostContext, message, until, agentThreadId, groupChatId, sessionId, teamId, userId } from './helpers.mjs';
+import { fixture, hostContext, message, until, agentThreadId, groupChatId, sessionId, teamId, userId, contract } from './helpers.mjs';
 import { parseQuestionReply } from '../dist/questions.js';
 
 async function setup(t, hostOptions, config) {
@@ -17,7 +17,7 @@ function event(ctx, type, data, id = agentThreadId) { return ctx.emit('session/e
 async function cardAfter(f, before = 0) { await until(() => f.rpcs.filter(rpc => rpc.method === 'card.upsert').length > before); return f.rpcs.filter(rpc => rpc.method === 'card.upsert').at(-1); }
 const approvalQuestion = { id: 'perm', question: 'May I write the file?', intent: { kind: 'approval', approve: 'Allow once', reject: 'Deny' }, options: [{ label: 'Allow once' }, { label: 'Allow for this session' }, { label: 'Deny' }] };
 
-test('thread drives deterministic fresh/resumed sessions, coalesces creation, formats roster and auto-publishes final text', async t => {
+test('thread drives deterministic fresh/resumed sessions, formats roster and keeps final text private', async t => {
   const { f, ctx, host, agent } = await setup(t);
   assert.equal(ctx.calls.resume[0].resumeSessionId, agentThreadId); assert.equal(ctx.calls.create.length, 1);
   assert.ok(host.ownsAgent(agent)); assert.match(ctx.calls.followup[0].message.content[0].text, /Alex \(3456789/);
@@ -28,7 +28,7 @@ test('thread drives deterministic fresh/resumed sessions, coalesces creation, fo
   await event(ctx, 'assistant/message', { turn: 1, message: { content: [{ type: 'thinking', text: 'private reasoning' }, { type: 'text', text: 'Final answer' }] } });
   await event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } });
   const sent = f.rpcs.find(rpc => rpc.method === 'group_chat.send_message');
-  assert.deepEqual(sent.params, { sessionId, content: 'Final answer', toolCallId: `turn:${agentThreadId}:1` });
+  assert.equal(sent, undefined);
   assert.equal(f.rpcs.at(-1).params.state, 'idle');
   assert.equal(ctx.options.get('session/event').global, true);
   await host.close(); assert.equal(ctx.toolDefinitions.size, 0); assert.equal(ctx.listeners.get('approval/request').length, 0);
@@ -41,20 +41,20 @@ test('resume success never creates a new session; permission errors never fall b
   assert.equal(deniedCtx.calls.create.length, 0); assert.equal(deniedCtx.calls.followup.length, 0);
   assert.equal(f.frames.filter(frame => frame.type === 'ack').length, 0);
 });
-test('explicit send_message suppresses auto-publishing final assistant recap; aborted turns and child output are not published', async t => {
+test('explicit send_message publishes while final assistant recap, aborted turns and child output stay private', async t => {
   const { f, ctx, agent } = await setup(t);
   await event(ctx, 'turn/start', { turn: 2 });
   await event(ctx, 'assistant/message', { turn: 2, message: { content: [{ type: 'text', text: 'Working' }] } });
-  const tool = ctx.toolDefinitions.get('nia_group_chat_send_message');
+  const tool = ctx.toolDefinitions.get('send_message');
   await tool.definition.execute({ content: 'Published via tool' }, { agent, callId: 'progress:1', signal: new AbortController().signal });
   await event(ctx, 'assistant/message', { turn: 2, message: { content: [{ type: 'text', text: 'Recap that should stay private' }] } });
   await event(ctx, 'turn/end', { turn: 2, reason: { kind: 'completed' } });
   assert.deepEqual(f.rpcs.filter(rpc => rpc.method === 'group_chat.send_message').map(rpc => rpc.params.content), ['Published via tool']);
-  // Post-tool EMPTY_RESPONSE (e.g. Gemini silent stop after nia_group_chat_send_message) lands cleanly on idle without false error badge.
+  // Post-tool EMPTY_RESPONSE (e.g. Gemini silent stop after send_message) lands cleanly on idle without false error badge.
   await event(ctx, 'turn/start', { turn: 21 });
   await tool.definition.execute({ content: 'Already delivered via tool' }, { agent, callId: 'progress:2', signal: new AbortController().signal });
   await event(ctx, 'turn/end', { turn: 21, reason: { kind: 'error', error: { code: 'EMPTY_RESPONSE', message: 'model returned no content' } } });
-  assert.deepEqual(f.rpcs.filter(rpc => rpc.method === 'thread.activity').at(-1).params, { sessionId, state: 'idle' });
+  assert.deepEqual(f.rpcs.filter(rpc => rpc.method === 'thread.activity').at(-1).params, { sessionId, state: 'idle', deliveryId: f.frames.find(frame => frame.type === 'ack').deliveryId });
   // Genuine post-tool errors and EMPTY_RESPONSE when nothing was published still surface errorMessage.
   await event(ctx, 'turn/start', { turn: 22 });
   await tool.definition.execute({ content: 'Partial update before failure' }, { agent, callId: 'progress:3', signal: new AbortController().signal });
@@ -88,7 +88,7 @@ test('real RS256 approval allows once, tampered argument hash fails closed, desc
   const tampered = await cardAfter(f, 1); await f.confirm(tampered, { tamper: true }); assert.equal(await denied, 'rejected');
   const noToken = ctx.emit('approval/request', { ...req, callId: 'call-3' }, () => assert.fail('must intercept'));
   const unsigned = await cardAfter(f, 2);
-  f.send({ type: 'card.action', protocolVersion: 1, deliveryId: 'unsigned', sessionId, groupChatId, agentThreadId, cardId: unsigned.params.cardId, decision: 'approved', clickedBy: { userId, name: 'Alex' } });
+  f.send({ type: 'card.action', protocolVersion: 2, deliveryId: 'unsigned', sessionId, groupChatId, agentThreadId, cardId: unsigned.params.cardId, decision: 'approved', clickedBy: { userId, name: 'Alex' } });
   assert.equal(await noToken, 'rejected');
   const stranger = ctx.addChild('stranger');
   assert.equal(await ctx.emit('approval/request', { ...req, agent: stranger }, async () => 'fallback'), 'fallback');
@@ -135,7 +135,7 @@ test('thread cancellation stops Agent and pending questions; group removal dispo
   const answer = ctx.emit('user-questions/request', { agent, questions: [{ id: 'q', question: 'Continue?' }] });
   const rejected = assert.rejects(answer, error => error.code === 'ASK_ABORTED');
   await until(() => f.rpcs.some(rpc => rpc.method === 'group_chat.send_message'));
-  f.send({ type: 'thread.cancel', protocolVersion: 1, deliveryId: 'stop', sessionId, groupChatId, agentThreadId, reason: 'removed_from_group' });
+  f.send({ type: 'thread.cancel', protocolVersion: 2, deliveryId: 'stop', sessionId, groupChatId, agentThreadId, reason: 'removed_from_group' });
   await rejected; await until(() => ctx.calls.disposed.includes(agentThreadId));
   assert.equal(ctx.calls.cancelled.length, 1); assert.equal(host.ownsAgent(agent), false);
 });
@@ -166,7 +166,7 @@ test('abort before card upsert response cancels again after upsert; already-abor
   const pending = ctx.emit('approval/request', { agent, toolName: 'shell', callId: 'slow-upsert', signal: abort.signal });
   const card = await cardAfter(f); abort.abort();
   await until(() => f.rpcs.some(rpc => rpc.method === 'card.cancel'));
-  f.send({ type: 'rpc.response', protocolVersion: 1, requestId: card.requestId, ok: true, result: { cardId: card.params.cardId } });
+  f.send({ type: 'rpc.response', protocolVersion: 2, requestId: card.requestId, ok: true, result: { cardId: card.params.cardId } });
   assert.equal(await pending, 'cancelled');
   assert.equal(f.rpcs.filter(rpc => rpc.method === 'card.cancel').length, 2);
 });
@@ -189,7 +189,7 @@ test('plugin shutdown cancels pending approvals and disposes all its resources',
   await cardAfter(f); await host.close(); assert.equal(await pending, 'cancelled');
   assert.equal(ctx.toolDefinitions.size, 0); assert.deepEqual(ctx.calls.disposed, [agentThreadId]);
 });
-test('agent setup injects GroupChat @mention and Rich HTML CSS variable guidance into system-prompt/assemble without mutating host files', async t => {
+test('agent setup injects exact server policy into system-prompt/assemble without mutating host files', async t => {
   const { ctx, agent } = await setup(t);
   const setupFn = ctx.calls.create[0].setup;
   assert.equal(typeof setupFn, 'function');
@@ -201,7 +201,26 @@ test('agent setup injects GroupChat @mention and Rich HTML CSS variable guidance
   const groupChatSection = assembled.sections.find(section => section.name === 'nia-teams:group-chat');
   assert.ok(groupChatSection);
   assert.equal(groupChatSection.interpolate, false);
-  assert.match(groupChatSection.text, /<mention userId="24-hex-member-id" \/>/);
-  assert.match(groupChatSection.text, /var\(--bg-card\)/);
-  assert.match(groupChatSection.text, /Rich HTML/);
+  assert.equal(groupChatSection.text, contract.systemPrompt);
+});
+
+test('server reminder reuses local DSH session and tools expose the ready contract', async t => {
+  const { f, ctx, agent } = await setup(t);
+  const send = ctx.toolDefinitions.get('send_message').definition;
+  assert.equal(send.description, contract.tools[0].description);
+  assert.deepEqual(send.parameters, contract.tools[0].inputSchema);
+  await event(ctx, 'turn/start', { turn: 1 });
+  await event(ctx, 'assistant/message', { turn: 1, content: 'Private result' });
+  await event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } });
+  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
+  const reminder = { ...message(), prompt: '<system-reminder>Send a reply.</system-reminder>' };
+  f.send(reminder); await until(() => ctx.calls.followup.length === 2);
+  assert.equal(ctx.calls.followup[1].message.content[0].text, reminder.prompt);
+  assert.equal(ctx.calls.create.length, 1);
+  await event(ctx, 'turn/start', { turn: 2 });
+  const result = await send.execute({ content: 'Explicit reply' }, { agent, callId: 'reminder-send' });
+  assert.equal(result.message, '消息已发布到聊天');
+  await ctx.toolDefinitions.get('chat_history').definition.execute({ limit: 5 }, { agent });
+  await event(ctx, 'turn/end', { turn: 2, reason: { kind: 'completed' } });
+  assert.equal(f.rpcs.filter(r => r.method === 'thread.activity').at(-1).params.deliveryId, reminder.deliveryId);
 });

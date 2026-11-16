@@ -12,6 +12,8 @@ nia-doubao start --cwd "." --daemon
 
 AI coding agents: load [skills/nia-teams-doubao/SKILL.md](./skills/nia-teams-doubao/SKILL.md); installed path: `node_modules/@nia-teams/doubao-bridge/skills/nia-teams-doubao/SKILL.md`.
 
+For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+
 ## 1. Product Overview & Collaboration Model
 
 Desktop mode reads signed-in cookies through local CDP and runs tasks through an HTTP local runtime. Official CLI mode runs local processes and hands login to the interactive terminal. Both retain per-GroupChat sessions.
@@ -124,6 +126,8 @@ Local permissions default to `AskOnRisk`: ordinary workspace reads may run, whil
 
 An HTTP task runs in one local worker that waits for completion. Accepted conversation/run IDs are recorded as soon as available. GroupChat cancellation stops the accepted remote run before ending the worker. Publication requires matching conversation/run IDs, completed status, and nonempty reply text. Official CLI cancellation targets its local process group; its sessions are separate from HTTP tasks.
 
+Intermediate output stays on the host while execution status syncs to GroupChat. A successful nonempty completed reply is published when the turn finishes.
+
 ### Step 4: Invite the external Agent and verify presence
 
 Click **Go to GroupChat** on the pairing confirmation page, or open Nia Teams **Messages** in the left navigation:
@@ -136,7 +140,7 @@ Watch the activity strip above the composer: red **Disconnected** changes to **I
 
 ### Step 5: Mention the Agent and manage its lifecycle
 
-Type `@` in the composer and select the external Agent. Its activity becomes executing while the task runs, and the final reply returns to GroupChat. Incoming prompts include title, URL, members, sender, messages, and attachment transcripts. Notify a person with their ID: `<mention userId="24-hex-id" />`, rather than plain `@Name`.
+Type `@` in the composer and select the external Agent. Its activity becomes executing while the task runs, and replies appear in GroupChat when the turn finishes. Incoming prompts include title, URL, members, sender, messages, and attachment transcripts. Notify a person with their ID: `<mention userId="24-hex-id" />`, rather than plain `@Name`.
 
 - **Temporary offline**: Press `Ctrl+C` in the foreground terminal or send SIGTERM to the recorded background PID. Presence becomes **Disconnected**. Restart loads existing credentials and session mappings.
 - **Move or unpair a host**: An Agent `owner` / `admin` pairs the new host and selects **Rebind existing external Agent**. To unpair only, use **Apps → Agent Settings → Unpair host** in a shared chat’s upper-right header. Rebind/unpair increments `keyGeneration` to invalidate old host credentials and disconnects the old host with `4401`. A competing connection taking over the same identity closes the old connection with `4409`, stopping reconnects.
@@ -148,7 +152,7 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 - **status fails**: Check OS user, config directory, file permissions, and completed pairing. A locally operated re-pair may be needed after rebind/unpair; diagnose network and origin failures before replacing credentials.
 - **Chat stays red Disconnected**: Inspect the daemon, `/tmp/nia-doubao.log`, saved Server, and chat Agent identity. Check for another process using the credentials. Close code `4409` means another connection took over.
 - **Doubao login or startup fails**: Run the Doubao desktop client or Doubao CLI under the same OS user, sign in, and verify Node version and binary selection. Doubao sign-in and Nia pairing are separate.
-- **Execution without a reply**: Inspect Doubao results and publication errors. Check cancellation, session rotation, and final text. A successful explicit GroupChat send suppresses duplicate final text for that turn.
+- **Execution without a reply**: Check the daemon log for runtime or publication errors, and verify the turn was not canceled or interrupted by session rotation.
 
 ## 3. CLI, Environment & Package Exports
 
@@ -206,7 +210,7 @@ The local HTTP runtime uses `AskOnRisk` / `FullAccess` or official CLI `ask_alwa
 
 ### 2. GroupChat tools, messages, and native mentions
 
-Desktop HTTP and official CLI return task text to the runner, which publishes through the shared queue. This package does not inject MCP GroupChat tools into the Doubao model. `nia_group_chat_send_message` / `nia_group_chat_history` are collaboration interfaces for dynamic-tool or MCP adapters; custom consumers can call the corresponding bridge RPCs.
+The desktop HTTP runtime and official CLI publish the completed reply when the turn finishes. Doubao does not expose custom GroupChat tools; intermediate output stays on the host.
 
 Incoming prompts list `Members: Alice (<userId>), ...`; each message includes sender ID, timestamp, message ID, reply reference, and attachment transcripts. Generic headers may appear as `[chat:<chatId>] Alice (<userId>): ...`, or structured channels may expose `senderId`; raw bridge frames use `messages[].authorId`. Use `<mention userId="24-hex-id" />` with a received sender/member ID for native notifications.
 

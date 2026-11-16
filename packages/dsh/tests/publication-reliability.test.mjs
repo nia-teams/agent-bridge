@@ -26,64 +26,16 @@ function releaseReady(f) { f.holdReady = false; const ready = f.waitingReady; f.
 const messages = f => f.rpcs.filter(rpc => rpc.method === 'group_chat.send_message');
 const idle = f => f.rpcs.filter(rpc => rpc.method === 'thread.activity' && rpc.params.state === 'idle');
 
-test('LOST FINAL RESULT: outage before turn/end queues answers in order, then ready flushes exact IDs and final idle', async t => {
+test('silent turn queues only idle through an outage, never buffered assistant text', async t => {
   const { f, ctx } = await setup(t);
-  await prepareTurn(ctx, 1, 'LOST FINAL RESULT');
+  await prepareTurn(ctx, 1, 'PRIVATE ASSISTANT TEXT');
   await disconnectAndHoldReady(f);
   await event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } });
-  await prepareTurn(ctx, 2, 'SECOND FINAL RESULT');
-  await event(ctx, 'turn/end', { turn: 2, reason: { kind: 'error', error: { message: 'Example turn error' } } });
   assert.equal(messages(f).length, 0);
   releaseReady(f);
-  await until(() => messages(f).length === 2 && idle(f).length > 0, 'replayed final publications and idle');
-  assert.deepEqual(messages(f).map(rpc => rpc.params), [
-    { sessionId, toolCallId: `turn:${agentThreadId}:1`, content: 'LOST FINAL RESULT' },
-    { sessionId, toolCallId: `turn:${agentThreadId}:2`, content: 'SECOND FINAL RESULT' },
-  ]);
-  assert.equal(idle(f).at(-1).params.errorMessage, 'Example turn error');
-  assert.equal(ctx.calls.followup.length, 1, 'already-acked inbound message is not needed for recovery');
-});
-
-test('outage during final send reuses toolCallId after an accepted send with a lost RPC response', async t => {
-  const { f, ctx } = await setup(t);
-  const published = new Map(); const attempts = [];
-  f.holdReady = true;
-  f.handleRpc = (rpc, ws) => {
-    if (rpc.method !== 'group_chat.send_message') return false;
-    attempts.push(rpc.params.toolCallId);
-    // Model the server idempotency boundary: first request commits, but its acknowledgment is lost.
-    if (!published.has(rpc.params.toolCallId)) published.set(rpc.params.toolCallId, rpc.params.content);
-    if (attempts.length === 1) { ws.terminate(); return true; }
-    return false;
-  };
-  await prepareTurn(ctx, 7, 'LOST FINAL RESULT');
-  await event(ctx, 'turn/end', { turn: 7, reason: { kind: 'completed' } });
-  await until(() => f.waitingReady);
-  assert.equal(attempts.length, 1);
-  releaseReady(f);
-  await until(() => attempts.length === 2 && idle(f).length === 1);
-  assert.deepEqual(attempts, [`turn:${agentThreadId}:7`, `turn:${agentThreadId}:7`]);
-  assert.deepEqual([...published.values()], ['LOST FINAL RESULT']);
-});
-
-test('non-retryable send error drops the item, logs failure, and does not retry it on later ready', async t => {
-  const { f, ctx } = await setup(t);
-  f.handleRpc = (rpc, ws) => {
-    if (rpc.method !== 'group_chat.send_message') return false;
-    ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 1, requestId: rpc.requestId, ok: false,
-      error: { code: 'session_not_found', message: 'Session no longer exists', retryable: false } }));
-    return true;
-  };
-  await prepareTurn(ctx, 1, 'Terminal failure');
-  await event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } });
-  await until(() => ctx.calls.warnings.some(warning => warning.includes('Session no longer exists')));
-  await disconnectAndHoldReady(f);
-  f.handleRpc = undefined;
-  releaseReady(f);
-  await prepareTurn(ctx, 2, 'Next answer');
-  await event(ctx, 'turn/end', { turn: 2, reason: { kind: 'completed' } });
-  await until(() => messages(f).length === 2 && idle(f).length > 0);
-  assert.deepEqual(messages(f).map(rpc => rpc.params.toolCallId), [`turn:${agentThreadId}:1`, `turn:${agentThreadId}:2`]);
+  await until(() => idle(f).length === 1);
+  assert.equal(messages(f).length, 0);
+  assert.equal(idle(f)[0].params.deliveryId, f.frames.find(frame => frame.type === 'ack').deliveryId);
 });
 
 test('ordinary question requested while reconnecting publishes on ready and consumes the answer without followup', async t => {

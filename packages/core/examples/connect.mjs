@@ -1,14 +1,20 @@
-import { BridgeClient, defaultConfigDir, loadCredentials } from '@nia-teams/agent-bridge-core';
+import { BridgeClient, defaultConfigDir, loadCredentials, resolveThreadPrompt } from '@nia-teams/agent-bridge-core';
 
 const configDir = defaultConfigDir('my-agent', 'MY_AGENT_CONFIG_DIR');
 const bridge = new BridgeClient(await loadCredentials(configDir), {
   onError: error => console.error(error.message),
 });
 bridge.onThreadMessage(async frame => {
+  console.log(resolveThreadPrompt(frame));
   await bridge.rpc('group_chat.send_message', {
     sessionId: frame.sessionId,
     toolCallId: frame.deliveryId,
     content: 'Received',
+  });
+  await bridge.rpc('thread.activity', {
+    sessionId: frame.sessionId,
+    state: 'idle',
+    deliveryId: frame.deliveryId,
   });
 });
 bridge.onThreadCancel(() => {});

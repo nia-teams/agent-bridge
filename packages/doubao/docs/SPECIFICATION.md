@@ -2,6 +2,8 @@
 
 Pinned driver: MIT `doubao-cli@0.23.3`, Node >=22. Both local usage modes remain first-class. `work`/`doubao` select desktop AUTHENTICATION, not desktop webpack/DOM task execution. `cli` remains the separate official @bytedance/doubao-cli transport; explicit `headless` uses pre-provisioned independent HTTP credentials.
 
+The runtime has no custom tool injection. New conversations prepend `ready.systemPrompt`; resumed conversations retain their instructions. The adapter calls `context.send(replyText)` for successful nonempty completed replies; core does not publish return text. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
+
 ## Verified upstream findings
 
 - `src/headless.mjs:350–395`: local create/send WITHOUT --wait is supported, but starts an upstream detached submission/runtime worker. Thus --wait is not strictly required by 0.23.3; it IS chosen by this bridge to keep one owned, foreground local executor for the entire turn and avoid detached task ownership.

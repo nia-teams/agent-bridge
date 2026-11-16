@@ -20,7 +20,7 @@ async function setup(t) {
   const make = options => create({ cwd: dir, doubaoBin: nativeBinary, interactive: false, ...options });
   const records = async () => (await readFile(join(dir, 'calls.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   const calls = async () => (await records()).filter(x => x.args).map(x => x.args);
-  const context = overrides => ({ prompt: 'hello', signal: new AbortController().signal, session: async () => {}, ...overrides });
+  const context = overrides => ({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'hello', signal: new AbortController().signal, session: async () => {}, ...overrides });
   return { dir, make, calls, records, context, spawns };
 }
 for (const os of ['darwin', 'linux', 'win32']) test(`${os} auto native runtime is preferred over PATH, and explicit binary wins`, async t => {
@@ -55,7 +55,7 @@ test('ready: unauthenticated interactive terminal inherits all stdio, logs in, r
   const runner = make({ interactive: true }); await runner.ready();
   assert.deepEqual(await calls(), [['auth', 'status', '--verify'], ['login'], ['auth', 'status', '--verify']]);
   assert.equal(spawns.find(x => x.args.at(-1) === 'login').options.stdio, 'inherit');
-  assert.deepEqual(await runner(context()), { text: 'Doubao final reply' });
+  assert.deepEqual(await runner(context()), undefined);
   assert.equal((await calls()).filter(a => a[0] === 'login').length, 1);
 });
 test('ready: unauthenticated non-TTY fails closed with terminal guidance, no login', async t => {
@@ -82,13 +82,15 @@ test('ready: login exit 0 without verified saved session still fails closed', as
   assert.deepEqual(await calls(), [['auth', 'status', '--verify'], ['login'], ['auth', 'status', '--verify']]);
 });
 test('native turn uses official arguments, stores cli prefix, resumes only matching namespace', async t => {
-  const { make, calls, context, dir } = await setup(t); const sessions = [];
+  const { make, calls, context, dir } = await setup(t); const sessions = [], published = [];
   const runner = make({ platform: 'cli', model: 'native-model' });
-  const first = await runner(context({ prompt: 'hi --literal', session: async id => sessions.push(id) }));
-  assert.deepEqual(first, { text: 'Doubao final reply' }); assert.match(sessions[0], /^cli:.+/);
+  const first = await runner(context({ systemPrompt: 'Server policy', send: async text => published.push(text), prompt: 'hi --literal', session: async id => sessions.push(id) }));
+  assert.deepEqual(published, ['Doubao final reply']);
+  assert.deepEqual(first, undefined); assert.match(sessions[0], /^cli:.+/);
   await runner(context({ resume: sessions[0] }));
   const turns = (await calls()).filter(a => a.includes('-p'));
-  assert.deepEqual(turns[0], ['-C', dir, '--permission-mode', 'ask_always', '--model', 'native-model', '-p', 'hi --literal']);
+  assert.deepEqual(turns[0], ['-C', dir, '--permission-mode', 'ask_always', '--model', 'native-model', '-p', 'Server policy\n\nhi --literal']);
+  assert.equal(turns[1].at(-1), 'hello');
   assert.equal(turns[1][turns[1].indexOf('--resume') + 1], sessions[0].slice(4));
 });
 for (const stale of ['work:1234567890123456789', 'doubao:1234567890123456789', 'headless:1234567890123456789', 'legacy-native-id']) test(`native ignores stale resume ${stale}`, async t => {
@@ -99,15 +101,15 @@ for (const stale of ['work:1234567890123456789', 'doubao:1234567890123456789', '
 });
 test('native full-auto selects always_allow; default approval fails closed and never resends', async t => {
   const { make, calls, context } = await setup(t);
-  await assert.rejects(make()(context({ prompt: 'approval-needed' })), /User input is required/);
-  assert.deepEqual(await make({ fullAuto: true })(context({ prompt: 'approval-needed' })), { text: 'Doubao final reply' });
+  await assert.rejects(make()(context({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'approval-needed' })), /User input is required/);
+  assert.deepEqual(await make({ fullAuto: true })(context({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'approval-needed' })), undefined);
   const turns = (await calls()).filter(a => a.includes('-p'));
   assert.equal(turns.length, 2); assert.ok(turns[1].includes('always_allow'));
 });
 test('native cancellation terminates the process group and never persists a stale final', async t => {
   const { make, calls, records, context } = await setup(t); const controller = new AbortController();
   const runner = make(); await runner.ready(); let persisted = false;
-  const turn = runner(context({ prompt: 'hold', signal: controller.signal, session: async () => { persisted = true; } }));
+  const turn = runner(context({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'hold', signal: controller.signal, session: async () => { persisted = true; } }));
   for (let i = 0; i < 200 && !(await calls()).some(a => a.includes('-p')); i++) await new Promise(r => setTimeout(r, 10));
   await new Promise(r => setTimeout(r, 40)); controller.abort(new Error('native cancelled'));
   await assert.rejects(turn, /native cancelled/);

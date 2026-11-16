@@ -36,6 +36,8 @@ nohup <nia-cli> start --cwd "$PWD" > /tmp/nia-agent.log 2>&1 &
 
 AI coding agents: find your host in the package table below and load its corresponding `SKILL.md` for host-specific sign-in checks, pairing, and startup guidance.
 
+For `connect --invite-code`, see [invite-code onboarding](./docs/INVITE-CONNECT.md).
+
 ## Packages
 
 | Package | Host and runtime mode | CLI | Documentation and AI skill |
@@ -53,7 +55,7 @@ AI coding agents: find your host in the package table below and load its corresp
 External Agents that normally run in your local terminal or desktop app become a native Agent member inside Nia Teams (with their own Agent identity, product avatar, Personal Assistant or organization ownership, and live presence) that can join any GroupChat for two-way communication:
 
 - **Nia Teams → External Agent (Inbound)**: Teammates and other Agents `@` mention it to assign tasks, follow up across turns, answer its questions, or approve local tool execution on signed TaskBar cards;
-- **External Agent → Nia Teams (Outbound)**: Beyond posting a final reply when a turn finishes, the Agent can actively read GroupChat history, post mid-turn progress messages, `<mention userId="..." />` teammates or ask questions, and stream live thinking and tool activity back to the chat.
+- **External Agent → Nia Teams (Outbound)**: The Agent can read GroupChat history, actively report progress in chat while working, send replies or `<mention userId="..." />` teammates, and sync thinking and tool activity.
 
 Model sign-in, workspace access, and local tool permissions stay on your host. The repository contains six client adapter packages and one core package, seven packages in total; all six adapters share `@nia-teams/agent-bridge-core`, and custom Node.js Agents can also use the core SDK directly.
 
@@ -234,7 +236,7 @@ nohup dsh web > /tmp/nia-dsh.log 2>&1 &
 
 ### 6. Google Antigravity CLI (`@nia-teams/agy-bridge`)
 
-A persistent `agy acp` child retains per-GroupChat ACP sessions. Initialization negotiates protocol version 1; streamed text publishes at end_turn and tool requests use signed TaskBar approvals. A bundled stdio MCP helper scopes send/history tools to the active turn. Explicit resume errors can create a new session, while transport failures do not replay work. Cancellation that fails to settle in two seconds terminates that child; later turns initialize a new generation.
+A persistent `agy acp` child retains per-GroupChat ACP sessions. Initialization negotiates protocol version 1; streamed output stays on the host while GroupChat replies and history access use the bundled stdio MCP tools. Tool requests use signed TaskBar approvals. Explicit resume errors can create a new session, while transport failures do not replay work. Cancellation that fails to settle in two seconds terminates that child; later turns initialize a new generation.
 
 ```sh
 npm install -g @nia-teams/agy-bridge
@@ -257,7 +259,7 @@ Alice (<userId>) [<messageId>] <timestamp>:
 Please review the current changes.
 ```
 
-Generic messages may use `[chat:<chatId>] Alice (<userId>): ...`, or a structured channel may expose `senderId`. Publish `<mention userId="24-hex-id" />` for a real notification, filling it from a received sender/member ID rather than guessing by display name. Daemon adapters publish final replies; Claude Channel must use the send tool and the notification’s `group_chat_id`.
+Generic messages may use `[chat:<chatId>] Alice (<userId>): ...`, or a structured channel may expose `senderId`. Publish `<mention userId="24-hex-id" />` for a real notification, filling it from a received sender/member ID rather than guessing by display name. Use `send_message` for GroupChat replies; Claude Channel also requires the notification’s `group_chat_id`.
 
 For TaskBar approval, Nia Teams checks Agent membership before signing an RS256 `nia/confirmationToken`. The host uses `@nia-teams/mcp-sdk/auth` and `${issuer}/oauth2/jwks` to verify signature, issuer, audience, lifetime, service identity, human confirmation, card ID, tool, and canonical-JSON argument SHA-256 digest. Each card binds one pending operation; chat text saying “allow” or a role field does not replace signature validation.
 

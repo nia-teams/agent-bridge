@@ -4,8 +4,9 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { BridgeClient, SessionHost, stableExternalAgentThreadId } from '@nia-teams/agent-bridge-core';
 import { createAgyRunner } from '../dist/index.js';
-import { fixture, message, until, agentThreadId, teamId } from '../../core/tests/helpers.mjs';
+import { fixture, message, until, agentThreadId, teamId, contract } from '../../core/tests/helpers.mjs';
 const binary = fileURLToPath(new URL('./mock-agy.mjs', import.meta.url));
+const idles = f => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle');
 const sends = f => f.rpcs.filter(r => r.method === 'group_chat.send_message');
 async function setup(t, options = {}) {
   const cleanups = [];
@@ -23,27 +24,27 @@ async function setup(t, options = {}) {
   const idle = () => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle');
   return { f, host, runner, errors, events, idle };
 }
-test('ACP initialize, split streaming text, private thoughts, durable resume and one persistent child', async t => {
+test('ACP initialize, private streaming text/thoughts, durable resume and one persistent child', async t => {
   const { f, host, events, errors } = await setup(t);
-  host.message(message('hello')); await until(() => sends(f).length === 1, 'first reply', 10000);
-  host.message(message('second')); await until(() => sends(f).length === 2);
+  host.message(message('hello')); await until(() => idles(f).length >= 1, 'first reply', 10000);
+  host.message(message('second')); await until(() => idles(f).length >= 2);
   const e = await events();
   assert.equal(e.filter(e => e.kind === 'spawn').length, 1);
   const init = e.find(e => e.method === 'initialize');
-  assert.deepEqual(init.params, { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.1.0' } });
-  const fresh = e.find(e => e.method === 'session/new'); assert.match(fresh.params.systemPromptAppend, /mention userId/);
+  assert.deepEqual(init.params, { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.2.0' } });
+  const fresh = e.find(e => e.method === 'session/new'); assert.equal(fresh.params.systemPromptAppend, contract.systemPrompt);
   assert.ok(fresh.params.mcpServers[0].env.every(e => typeof e.name === 'string'));
   const saved = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'));
-  assert.equal(e.find(e => e.method === 'session/resume').params.sessionId, saved[agentThreadId].sessionId);
-  assert.deepEqual(sends(f).map(r => r.params.content), ['Hello from Antigravity', 'Hello from Antigravity']);
+  assert.equal(e.find(e => e.method === 'session/resume').params.sessionId, saved[agentThreadId].sessionId.slice(3));
+  assert.deepEqual(sends(f), []);
   assert.ok(f.rpcs.some(r => r.params.label === 'Running Read project…'));
   assert.deepEqual(errors, []);
 });
 test('explicit resume JSON-RPC error starts a new session and replaces the mapping', async t => {
   const { f, host, events } = await setup(t, { env: { AGY_TEST_RESUME: 'error' } });
-  host.message(message('first')); await until(() => sends(f).length === 1, 'first reply', 10000);
+  host.message(message('first')); await until(() => idles(f).length >= 1, 'first reply', 10000);
   const first = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'))[agentThreadId].sessionId;
-  host.message(message('second')); await until(() => sends(f).length === 2);
+  host.message(message('second')); await until(() => idles(f).length >= 2);
   assert.notEqual(JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'))[agentThreadId].sessionId, first);
   assert.equal((await events()).filter(e => e.method === 'session/new').length, 2);
 });
@@ -55,44 +56,34 @@ for (const verdict of ['approved','tampered','canceled','timeout']) test(`signed
   assert.equal(card.params.verifyToolName, 'agy.approval');
   assert.equal(card.params.verifyArguments.tool, 'agy:run_command');
   if (verdict !== 'timeout') await f.confirm(card, { tamper: verdict === 'tampered', decision: verdict === 'canceled' ? 'canceled' : 'approved' });
-  await until(() => sends(f).length === 1, 'first reply', 10000);
-  assert.equal(sends(f)[0].params.content, verdict === 'approved' ? 'Allowed' : 'Denied');
+  await until(() => idles(f).length >= 1, 'first reply', 10000);
+  assert.equal((await events()).find(e => e.kind === 'response').frame.result.outcome.optionId, verdict === 'approved' ? 'allow' : 'deny');
+  assert.deepEqual(sends(f), []);
   assert.equal((await events()).find(e => e.kind === 'response').frame.id, 1);
   assert.equal(errors.length > 0, verdict === 'tampered');
 });
 test('full-auto sets spawn flags and auto mode/model without creating a card', async t => {
   const { f, host, events } = await setup(t, { fullAuto: true, sandbox: true, model: 'test-model' });
-  host.message(message('permission')); await until(() => sends(f).length === 1, 'first reply', 10000);
+  host.message(message('permission')); await until(() => idles(f).length >= 1, 'first reply', 10000);
   const e = await events();
   assert.deepEqual(e.find(e => e.kind === 'spawn').args, ['acp','--dangerously-skip-permissions','--sandbox']);
   assert.equal(e.find(e => e.method === 'session/set_mode').params.modeId, 'auto');
   assert.equal(e.find(e => e.method === 'session/set_model').params.modelId, 'test-model');
-  assert.equal(sends(f)[0].params.content, 'Allowed'); assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
+  assert.equal(sends(f).length, 0); assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
 });
 test('explicit plan mode takes precedence over the full-auto default', async t => {
   const { f, host, events } = await setup(t, { fullAuto: true, mode: 'plan' });
-  host.message(message('hello')); await until(() => sends(f).length === 1, 'first reply', 10000);
+  host.message(message('hello')); await until(() => idles(f).length >= 1, 'first reply', 10000);
   assert.equal((await events()).find(e => e.method === 'session/set_mode').params.modeId, 'plan');
-});
-test('real stdio MCP helper routes send/history and suppresses duplicate final text across resume', async t => {
-  const { f, host, events, errors } = await setup(t);
-  host.message(message('use tools')); await until(() => sends(f).length === 1, 'MCP send', 10000);
-  await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
-  host.message(message('second-tools')); await until(() => sends(f).length === 2, 'resumed MCP send', 10000);
-  await until(() => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle').length === 2, 'both MCP turns completed', 10000);
-  assert.deepEqual(sends(f).map(r => r.params.content), ['ACP interim','Second scoped update']);
-  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.history').length, 2);
-  assert.equal((await events()).filter(e => e.kind === 'send' && !e.result.isError).length, 2);
-  assert.deepEqual(errors, []);
 });
 test('parallel chats multiplex streams and distinct sessions over the same child', async t => {
   const { f, host, events } = await setup(t);
   const group = 'abcdef123456abcdef123456';
   host.message(message('parallel-A'));
   host.message({ ...message('parallel-B'), groupChatId: group, agentThreadId: stableExternalAgentThreadId(group, teamId), sessionId: 'abcdefabcdefabcdefabcdef' });
-  await until(() => sends(f).length === 2);
-  assert.equal(sends(f).find(r => r.params.sessionId === 'abcdefabcdefabcdefabcdef').params.content, 'Reply B');
-  assert.equal(sends(f).find(r => r.params.sessionId !== 'abcdefabcdefabcdefabcdef').params.content, 'Reply A');
+  await until(() => idles(f).length >= 2);
+  assert.equal(sends(f).length, 0);
+  assert.equal(sends(f).length, 0);
   assert.equal((await events()).filter(e => e.kind === 'spawn').length, 1);
   const saved = Object.values(JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8')));
   assert.equal(new Set(saved.map(s => s.sessionId)).size, 2);
@@ -105,23 +96,23 @@ for (const ignore of [false,true]) test(`abort sends cancel, prevents stale publ
   assert.ok(ready, 'peer must record the active prompt before cancellation');
   host.cancel({ ...message(), type: 'thread.cancel', reason: 'user_aborted' });
   host.message(message('next'));
-  await until(() => sends(f).length === 1, 'post-abort reply', 7000);
-  assert.equal(sends(f)[0].params.content, 'Hello from Antigravity');
+  await until(() => idles(f).length >= 1, 'post-abort reply', 7000);
+  assert.equal(sends(f).length, 0);
   const e = await events(); assert.ok(e.some(e => e.method === 'session/cancel'));
   assert.equal(e.filter(e => e.kind === 'spawn').length, ignore ? 2 : 1);
 });
 test('child crash fails only the affected turns and a later request respawns cleanly', async t => {
   const { f, host, errors, events } = await setup(t);
   host.message(message('crash child')); await until(() => errors.length > 0);
-  host.message(message('recover')); await until(() => sends(f).length === 1, 'first reply', 10000);
+  host.message(message('recover')); await until(() => idles(f).length >= 2, 'first reply', 10000);
   assert.equal((await events()).filter(e => e.kind === 'spawn').length, 2);
 });
 test('transport failure during resume does not silently create a replacement session', async t => {
   const { f, host, errors, events } = await setup(t, { env: { AGY_TEST_RESUME: 'crash' } });
-  host.message(message('first')); await until(() => sends(f).length === 1, 'first reply', 10000);
+  host.message(message('first')); await until(() => idles(f).length >= 1, 'first reply', 10000);
   host.message(message('second')); await until(() => errors.length > 0);
   assert.equal((await events()).filter(e => e.method === 'session/new').length, 1);
-  assert.equal(sends(f).length, 1);
+  assert.equal(sends(f).length, 0);
 });
 for (const env of [{ AGY_TEST_INIT:'malformed' }, { AGY_TEST_INIT:'wrong-version' }, { AGY_TEST_INIT:'hang' }, { AGY_TEST_NEW:'missing-id' }]) test(`malformed or failed startup is closed and never published: ${JSON.stringify(env)}`, async t => {
   const { f, host, errors } = await setup(t, { env, requestTimeoutMs: 150 });
@@ -130,29 +121,29 @@ for (const env of [{ AGY_TEST_INIT:'malformed' }, { AGY_TEST_INIT:'wrong-version
 });
 test('resume identity mismatch does not publish or replace the saved mapping', async t => {
   const { f,host,errors }=await setup(t,{env:{AGY_TEST_RESUME:'mismatch'}});
-  host.message(message('first'));await until(()=>sends(f).length===1,'first',10000);
+  host.message(message('first'));await until(()=>idles(f).length >= 1,'first',10000);
   const before=await readFile(`${f.dir}/threads.json`,'utf8');
   host.message(message('second'));await until(()=>errors.length>0);
-  assert.equal(sends(f).length,1);assert.equal(await readFile(`${f.dir}/threads.json`,'utf8'),before);
+  assert.equal(sends(f).length,0);assert.equal(await readFile(`${f.dir}/threads.json`,'utf8'),before);
 });
-test('oversized text is never published and closes the affected generation', async t => {
+test('oversized assistant text is ignored and never published', async t => {
   const { f,host,errors }=await setup(t);host.message(message('oversized'));
-  await until(()=>errors.length>0,'bounded output',10000);assert.equal(sends(f).length,0);
-  host.message(message('recover'));await until(()=>sends(f).length===1,'recovered output',10000);
+  await until(()=>idles(f).length===1,'ignored output',10000);assert.equal(sends(f).length,0);
+  host.message(message('recover'));await until(()=>idles(f).length >= 2,'recovered output',10000);
 });
-test('cancel during signed approval denies the pending tool and publishes only the next turn', async t => {
+test('cancel during signed approval denies the pending tool and allows a subsequent silent turn', async t => {
   const {f,host,events}=await setup(t);host.message(message('permission'));
   await until(()=>f.rpcs.some(r=>r.method==='card.upsert'),'pending permission',10000);
   host.cancel({...message(),type:'thread.cancel',reason:'user_aborted'});
-  host.message(message('next'));await until(()=>sends(f).length===1,'next',10000);
-  assert.equal(sends(f)[0].params.content,'Hello from Antigravity');
+  host.message(message('next'));await until(()=>idles(f).length >= 1,'next',10000);
+  assert.equal(sends(f).length, 0);
   assert.ok(f.rpcs.some(r=>r.method==='card.cancel'));
   assert.ok((await events()).some(e=>e.method==='session/cancel'));
 });
 test('full-auto cannot upgrade a protocol option to permanent allow', async t => {
   const {f,host,events}=await setup(t,{fullAuto:true});host.message(message('no once permission'));
-  await until(()=>sends(f).length===1,'safe fallback',10000);
-  assert.equal(sends(f)[0].params.content,'Denied');
+  await until(()=>idles(f).length >= 1,'safe fallback',10000);
+  assert.equal(sends(f).length, 0);
   assert.deepEqual((await events()).find(e=>e.kind==='response').frame.result,{outcome:{outcome:'cancelled'}});
 });
 test('abort while initialize is pending respects the two-second cancellation bound', { timeout: 8000 }, async t => {
@@ -164,4 +155,41 @@ test('abort while initialize is pending respects the two-second cancellation bou
   const start=Date.now();host.cancel({...message(),type:'thread.cancel',reason:'user_aborted'});
   await host.close();
   assert.ok(Date.now()-start<3500, 'host cleanup must not wait for the ten-second control timeout');assert.equal(sends(f).length,0);
+});
+
+test('real stdio MCP helper routes send/history and suppresses duplicate final text across resume', async t => {
+  const { f, host, events, errors } = await setup(t);
+  host.message(message('use tools')); await until(() => sends(f).length === 1, 'MCP send', 10000);
+  await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
+  host.message(message('second-tools')); await until(() => sends(f).length === 2, 'resumed MCP send', 10000);
+  await until(() => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle').length === 2, 'both MCP turns completed', 10000);
+  assert.deepEqual(sends(f).map(r => r.params.content), ['ACP interim','Second scoped update']);
+  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.history').length, 2);
+  assert.equal((await events()).filter(e => e.kind === 'send' && !e.result.isError).length, 2);
+  assert.deepEqual(errors, []);
+});
+
+
+test('legacy ACP mapping starts v2 session; resumed reminder receives latest server prompt and exact tools', async t => {
+  const { f, host, events } = await setup(t);
+  await host.close();
+  await writeFile(`${f.dir}/threads.json`, JSON.stringify({ [agentThreadId]: { sessionId: 'legacy-acp', groupChatId: message().groupChatId, updatedAt: 'now' } }), { mode: 0o600 });
+  const bridge = new BridgeClient(f.credentials);
+  const runner = createAgyRunner({ cwd: f.dir, agyBin: `${f.dir}/agy` });
+  const upgraded = new SessionHost(bridge, runner, { configDir: f.dir, runtime: 'Antigravity', approvalTool: 'agy.approval' });
+  t.after(async () => { await upgraded.close(); await runner.close(); bridge.close(); });
+  await upgraded.start(); await bridge.start();
+  const first = message(); f.send(first); await until(() => idles(f).length === 1);
+  const saved = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'))[agentThreadId].sessionId;
+  assert.ok(saved.startsWith('v2:'));
+  const reminder = { ...message(), prompt: '<system-reminder>use tools to reply</system-reminder>' };
+  f.send(reminder); await until(() => idles(f).length === 2, 'resumed reminder', 10000);
+  const e = await events();
+  assert.equal(e.filter(e => e.method === 'session/new').length, 1);
+  assert.equal(e.find(e => e.method === 'session/resume').params.sessionId, saved.slice(3));
+  assert.equal(e.find(e => e.method === 'session/resume').params.systemPromptAppend, contract.systemPrompt);
+  assert.equal(e.filter(e => e.method === 'session/prompt')[1].params.prompt[0].text, reminder.prompt);
+  assert.deepEqual(e.find(e => e.kind === 'tools').result.tools, contract.tools);
+  assert.equal(idles(f)[1].params.deliveryId, reminder.deliveryId);
+  assert.deepEqual(sends(f).map(r => r.params.content), ['ACP interim']);
 });

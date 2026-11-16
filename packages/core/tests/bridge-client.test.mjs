@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BridgeClient } from '../dist/index.js';
-import { fixture, message, until, sessionId } from './helpers.mjs';
+import { fixture, message, until, sessionId, contract } from './helpers.mjs';
 
 test('challenge → signed lease → hello/ready, heartbeat, concurrent dedup, and reconnect replay', async t => {
   const f = await fixture(t); const errors = [];
@@ -56,7 +56,7 @@ test('rotated keys fail before lease and superseded host stops reconnecting', as
 test('structured RPC errors preserve code and retryability', async t => {
   const f = await fixture(t); const bridge = new BridgeClient(f.credentials); t.after(() => bridge.close());
   await bridge.start();
-  f.handleRpc = (rpc, ws) => { ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 1, requestId: rpc.requestId, ok: false, error: { code: 'invalid_request', message: 'Invalid parameters', retryable: false } })); return true; };
+  f.handleRpc = (rpc, ws) => { ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 2, requestId: rpc.requestId, ok: false, error: { code: 'invalid_request', message: 'Invalid parameters', retryable: false } })); return true; };
   await assert.rejects(bridge.rpc('group_chat.history', { sessionId }), error => error.code === 'invalid_request' && error.retryable === false && error.message === 'Invalid parameters');
 });
 
@@ -120,4 +120,49 @@ test('every authenticated reconnect reports installed client branding for alread
     assert.equal(body.avatar, metadata.avatar);
     assert.ok(body.signature);
   }
+});
+
+
+test('ready contract is exposed and refreshed on reconnect', async t => {
+  const f = await fixture(t), bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 5 });
+  t.after(() => bridge.close()); assert.equal(bridge.getContract(), undefined);
+  await bridge.start(); assert.deepEqual(bridge.getContract(), contract);
+  const old = f.socket;
+  const next = { systemPrompt: 'Latest server policy', tools: [{ name: 'custom', description: '', inputSchema: {} }] };
+  f.readyOverrides = next; old.terminate();
+  await until(() => bridge.getContract()?.systemPrompt === next.systemPrompt);
+  assert.deepEqual(bridge.getContract(), next);
+});
+
+for (const invalid of [
+  { systemPrompt: undefined }, { systemPrompt: '' }, { systemPrompt: '  ' }, { systemPrompt: 7 },
+  { tools: undefined }, { tools: {} }, { tools: [null] }, { tools: [{ name: '', description: '', inputSchema: {} }] },
+  { tools: [{ name: 'x', description: 2, inputSchema: {} }] },
+  { tools: [{ name: 'x', description: '', inputSchema: [] }] },
+]) test(`invalid ready contract closes 4401: ${JSON.stringify(invalid)}`, async t => {
+  const f = await fixture(t); f.readyOverrides = invalid;
+  const bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 60_000 });
+  t.after(() => bridge.close());
+  let closed; f.onReady = ws => ws.on('close', (code, reason) => { closed = { code, reason: reason.toString() }; });
+  await assert.rejects(bridge.start(), /4401/);
+  await until(() => closed); assert.deepEqual(closed, { code: 4401, reason: 'invalid ready' });
+  assert.equal(bridge.getContract(), undefined);
+});
+
+for (const type of ['ready', 'heartbeat', 'ack', 'rpc.request', 'rpc.response', 'thread.message', 'card.action', 'thread.cancel']) {
+  test(`reject non-v2 ${type} with 4400 invalid frame`, async t => {
+    const f = await fixture(t), bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 60_000 });
+    t.after(() => bridge.close()); await bridge.start(); let closed;
+    f.socket.on('close', (code, reason) => { closed = { code, reason: reason.toString() }; });
+    f.send({ ...message(), type, protocolVersion: 1 });
+    await until(() => closed); assert.deepEqual(closed, { code: 4400, reason: 'invalid frame' });
+  });
+}
+
+test('nonstring thread prompt is invalid and is never acknowledged', async t => {
+  const f = await fixture(t), bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 60_000 });
+  t.after(() => bridge.close()); let accepted = false; bridge.onThreadMessage(() => { accepted = true; });
+  await bridge.start(); let code; f.socket.on('close', value => { code = value; });
+  f.send({ ...message(), prompt: {} }); await until(() => code);
+  assert.equal(code, 4400); assert.equal(accepted, false); assert.ok(!f.frames.some(f => f.type === 'ack'));
 });

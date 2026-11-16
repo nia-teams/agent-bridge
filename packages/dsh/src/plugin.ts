@@ -1,11 +1,11 @@
-import { formatThreadMessage as formatThread } from '@nia-teams/agent-bridge-core/format';
+import { resolveThreadPrompt as formatThread } from '@nia-teams/agent-bridge-core/format';
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import type { ExpectedHumanActionContext } from '@nia-teams/mcp-sdk/auth';
 import type { Credentials, ThreadMessage, CardAction, ThreadCancel, RpcMethod } from './types.js';
 import type { Agent, AgentHandle, AgentOptions, HostContext, ApprovalRequest, ApprovalOutcome, QuestionRequest, QuestionAnswer, SessionEvent, UserMessage, QuestionIntent } from './dsh-types.js';
 import { PublicationQueue } from './publications.js';
-import { NIA_GROUP_CHAT_SYSTEM_PROMPT } from './prompt.js';
+import type { BridgeContract } from '@nia-teams/agent-bridge-core';
 import { UserQuestionError, formatQuestions, parseQuestionReply } from './questions.js';
 
 export interface PluginConfig {
@@ -14,6 +14,7 @@ export interface PluginConfig {
   sessionAllowTools?: string[];
 }
 export interface PluginBridge {
+  getContract(): BridgeContract | undefined;
   readonly credentials: Credentials;
   start(): Promise<void>; close(): void;
   rpc(method: RpcMethod, params: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>>;
@@ -31,7 +32,7 @@ interface Thread {
 }
 interface CardWait { thread: Thread; sessionId: string; cardId: string; resolve(action: CardAction | undefined): void }
 interface QuestionWait { thread: Thread; request: QuestionRequest; resolve(answer: QuestionAnswer): void; reject(error: Error): void }
-interface Output { turn: number; texts: string[]; sent: Set<string>; toolSent: boolean }
+interface Output { turn: number; toolSent: boolean }
 
 function missingSession(error: unknown, id: string): boolean {
   if (!(error instanceof Error)) return false;
@@ -44,11 +45,6 @@ function userMessage(text: string): UserMessage {
   return Object.freeze({ id: randomUUID(), role: 'user', content: Object.freeze([Object.freeze({ type: 'text', text })]) as unknown as UserMessage['content'], source: Object.freeze({ kind: 'user' }) });
 }
 
-function assistantText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.flatMap(block => block && block.type === 'text' && typeof block.text === 'string' ? [block.text] : []).join('\n');
-}
 
 /** Owns every Agent handle, pending human operation, listener and activity lease for this plugin instance. */
 export class NiaTeamsHost {
@@ -72,17 +68,14 @@ export class NiaTeamsHost {
       ctx.on('user-questions/request', (request, next) => this.question(request, next), { global: true, prepend: true }),
       ctx.on('session/event', (session, event) => this.event(session.id, event).catch(error => this.warn(error)), { global: true }),
     );
+    const host = this;
     ctx.inject(['tools'], toolCtx => {
       if (this.lifetime.signal.aborted) return;
-      for (const kind of ['send_message', 'history'] as const) {
+      for (const kind of ['send_message', 'chat_history'] as const) {
         const remove = toolCtx.tools.register({
-          name: `nia_group_chat_${kind}`,
-          description: kind === 'send_message'
-            ? 'Publish an immediate mid-turn message (Markdown, inline Rich HTML using var(--*) theme CSS variables, and <mention userId="24-hex-id" />) to the current Nia Teams GroupChat while continuing tool execution. Single-step final replies are published automatically at turn end.'
-            : 'Read older messages from the current group chat.',
-          parameters: kind === 'send_message'
-            ? { type: 'object', properties: { content: { type: 'string', description: 'Message body supporting Markdown, Rich HTML, and <mention userId="24-hex-id" /> tags.' } }, required: ['content'], additionalProperties: false }
-            : { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 100 }, offset: { type: 'integer', minimum: 0 } }, additionalProperties: false },
+          name: kind,
+          get description() { return host.bridge.getContract()?.tools.find(t => t.name === kind)?.description ?? kind; },
+          get parameters() { return host.bridge.getContract()?.tools.find(t => t.name === kind)?.inputSchema ?? { type: 'object' }; },
           output: { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
           execute: async (args, exec) => {
             const thread = exec.agent && this.threadForAgent(exec.agent);
@@ -93,10 +86,10 @@ export class NiaTeamsHost {
               if (typeof input.content !== 'string' || !input.content.trim()) throw new Error('content must not be empty');
               const result = await this.sendMessage(thread, input.content, exec.callId, exec.signal);
               const output = this.outputs.get(exec.agent!.id);
-              if (output) { output.sent.add(input.content.trim()); output.texts = []; output.toolSent = true; }
+              if (output) output.toolSent = true;
               return {
                 ...result,
-                note: 'Published to GroupChat. If you have no more tool calls to run in this turn, respond with a short internal word like "Done." to close the turn cleanly (it stays private and will not be sent to the GroupChat).',
+                message: '消息已发布到聊天', published: true,
               };
             }
             const limit = input.limit ?? 50; const offset = input.offset ?? 0;
@@ -191,12 +184,14 @@ export class NiaTeamsHost {
             }>,
           ) => {
             const assembled = await next();
+            const contract = this.bridge.getContract();
+            if (!contract) throw new Error('Bridge contract is missing');
             const sections = Array.isArray(assembled.sections)
               ? [
                   ...assembled.sections.filter(section => section.name !== 'nia-teams:group-chat'),
-                  { name: 'nia-teams:group-chat', text: NIA_GROUP_CHAT_SYSTEM_PROMPT, interpolate: false },
+                  { name: 'nia-teams:group-chat', text: contract.systemPrompt, interpolate: false },
                 ]
-              : [{ name: 'nia-teams:group-chat', text: NIA_GROUP_CHAT_SYSTEM_PROMPT, interpolate: false }];
+              : [{ name: 'nia-teams:group-chat', text: contract.systemPrompt, interpolate: false }];
             return {
               ...assembled,
               sections,
@@ -304,35 +299,29 @@ export class NiaTeamsHost {
     const rootEvent = thread.handle?.agent === agent;
     const data = event.data;
     if (event.type === 'turn/start') {
-      this.outputs.set(sessionId, { turn: data.turn ?? 0, texts: [], sent: new Set(), toolSent: false });
+      this.outputs.set(sessionId, { turn: data.turn ?? 0, toolSent: false });
       await this.activity(thread, { state: 'executing', label: 'Thinking…' });
     } else if (event.type === 'tool/call') {
       await this.activity(thread, { state: 'executing', label: `Running ${data.name ?? data.toolName ?? 'tool'}…` });
-    } else if (event.type === 'assistant/message' && !data.interrupted && !data.message?.interrupted) {
-      const text = assistantText(data.message?.content ?? data.content).trim();
-      const output = this.outputs.get(sessionId);
-      if (output && text && output.turn === (data.turn ?? output.turn) && !output.sent.has(text)) output.texts.push(text);
     } else if (event.type === 'turn/end') {
       const output = this.outputs.get(sessionId);
       const alreadySentViaTool = Boolean(output && output.turn === data.turn && output.toolSent);
-      const text = output && output.turn === data.turn && !alreadySentViaTool ? output.texts.join('\n\n').trim() : '';
-      const interrupted = data.reason?.kind === 'aborted' || data.reason?.kind === 'interrupted';
       const silentPostToolStop = alreadySentViaTool && data.reason?.kind === 'error' && data.reason.error?.code === 'EMPTY_RESPONSE';
       if (rootEvent) {
         const niaSessionId = thread.frame.sessionId;
         const activityAfter = {
-          state: 'idle' as const,
+          state: 'idle' as const, deliveryId: thread.frame.deliveryId,
           ...(data.reason?.kind === 'error' && !silentPostToolStop
             ? { errorMessage: data.reason.error?.message ?? 'Agent turn failed' }
             : {}),
         };
         const revision = this.setActivity(thread, activityAfter);
         const completion = this.publications.enqueue({ niaSessionId, toolCallId: `turn:${sessionId}:${data.turn}`,
-          content: text && !interrupted ? text : undefined, activityAfter,
+          content: undefined, activityAfter,
           shouldSyncActivity: () => thread.frame.sessionId !== niaSessionId || thread.activityRevision === revision,
         });
         void completion.catch(error => { if (!this.lifetime.signal.aborted) this.warn(error); });
-        // Ownership of unsent content transfers to the retry queue before the turn buffer is released.
+        // The retry queue owns final idle telemetry; assistant text is never a publication.
         this.outputs.delete(sessionId);
         // Wait for this attempt, not for an indefinite outage: the queue owns reconnect retries.
         await this.publications.flush();

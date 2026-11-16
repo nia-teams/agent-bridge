@@ -27,7 +27,7 @@ export class McpRelay {
   register(context: TurnContext): { env: Array<{ name: string; value: string }>; revoke(): void } {
     if (!this.url) throw new Error('MCP relay is not started');
     const token = randomBytes(32).toString('base64url'); this.scopes.set(token, context);
-    return { env: [{ name: 'NIA_AGY_MCP_URL', value: this.url }, { name: 'NIA_AGY_MCP_TOKEN', value: token }], revoke: () => { this.scopes.delete(token); } };
+    return { env: [{ name: 'NIA_AGY_MCP_URL', value: this.url }, { name: 'NIA_AGY_MCP_TOKEN', value: token }, { name: 'NIA_AGY_MCP_TOOLS', value: JSON.stringify(context.tools) }], revoke: () => { this.scopes.delete(token); } };
   }
   private async handle(req: AsyncIterable<Buffer>, context: TurnContext, res: ServerResponse): Promise<void> {
     const chunks: Buffer[] = []; let size = 0;
@@ -36,10 +36,10 @@ export class McpRelay {
     const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!isObject(body) || !isObject(body.arguments)) throw new Error('Invalid tool request');
     const args = body.arguments; let result: unknown;
-    if (body.name === 'nia_group_chat_send_message') {
+    if (body.name === 'send_message') {
       if (Object.keys(args).some(k => k !== 'content') || typeof args.content !== 'string' || !args.content.trim()) throw new Error('Invalid send arguments');
-      await context.send(args.content); result = { sent: true };
-    } else if (body.name === 'nia_group_chat_history') {
+      await context.send(args.content); result = { message: '消息已发布到聊天', published: true };
+    } else if (body.name === 'chat_history') {
       const limit = args.limit ?? 50, offset = args.offset ?? 0;
       if (Object.keys(args).some(k => !['limit', 'offset'].includes(k)) || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 100 || !Number.isInteger(offset) || Number(offset) < 0) throw new Error('Invalid history range');
       result = await context.history(Number(limit), Number(offset));

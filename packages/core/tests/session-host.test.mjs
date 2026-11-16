@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SessionHost, consumeSdkQuery } from '../dist/index.js';
-import { fixture, message, until } from './helpers.mjs';
+import { SessionHost, consumeSdkQuery, BridgeClient, resolveThreadPrompt, formatThreadMessage } from '../dist/index.js';
+import { fixture, message, until, contract } from './helpers.mjs';
 
 test('activity transport failures cannot turn a successful SDK result into a failed turn', async t => {
   const f = await fixture(t), errors = [], calls = [];
   let activityFailures = 2;
   const bridge = {
+    getContract: () => contract,
     credentials: f.credentials,
     onReady: () => () => {}, onThreadMessage: () => () => {}, onThreadCancel: () => () => {}, onCardAction: () => () => {},
     async rpc(method, params) {
@@ -24,11 +25,11 @@ test('activity transport failures cannot turn a successful SDK result into a fai
   }, context), { configDir: f.dir, runtime: 'Test', approvalTool: 'test', onError: e => errors.push(e) });
   await host.start(); t.after(() => host.close()); host.message(message());
   await until(() => calls.some(c => c.method === 'thread.activity' && c.params.state === 'idle'));
-  assert.deepEqual(calls.filter(c => c.method === 'group_chat.send_message').map(c => c.params.content), ['Completed reply']);
+  assert.deepEqual(calls.filter(c => c.method === 'group_chat.send_message').map(c => c.params.content), []);
   assert.equal(errors.length, 2); assert.equal(closed, 1);
   // A later turn still runs after those errors.
   host.message(message('next'));
-  await until(() => calls.filter(c => c.method === 'group_chat.send_message').length === 2);
+  await until(() => calls.filter(c => c.method === 'thread.activity' && c.params.state === 'idle').length === 2);
 });
 
 for (const [label, events, expected] of [
@@ -38,4 +39,59 @@ for (const [label, events, expected] of [
   let closed = 0;
   await assert.rejects(consumeSdkQuery({ async *[Symbol.asyncIterator]() { yield* events; }, close() { closed++; } }, { signal: new AbortController().signal }), expected);
   assert.equal(closed, 1);
+});
+
+
+test('server reminder resumes the local session; only explicit send publishes and idle is delivery-scoped', async t => {
+  const f = await fixture(t), contexts = [];
+  const bridge = new BridgeClient(f.credentials);
+  const host = new SessionHost(bridge, async context => {
+    contexts.push(context);
+    if (!context.resume) await context.session('local-session');
+    else { await context.history(3, 0); await context.send('Explicit reply', 'send-1'); }
+    // Runtime JS can still return an obsolete shape; core must never publish it.
+    return { text: 'PRIVATE TERMINAL TEXT' };
+  }, { configDir: f.dir, runtime: 'Test', approvalTool: 'test' });
+  t.after(async () => { await host.close(); bridge.close(); });
+  await host.start(); await bridge.start();
+  const first = message(); f.send(first);
+  const idle = () => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle');
+  await until(() => idle().length === 1);
+  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
+  assert.equal(idle()[0].params.deliveryId, first.deliveryId);
+  const reminder = { ...message(), prompt: '<system-reminder>Use send_message to reply.</system-reminder>' };
+  f.send(reminder); await until(() => idle().length === 2);
+  assert.equal(contexts[1].prompt, reminder.prompt); assert.equal(contexts[1].resume, 'local-session');
+  assert.equal(contexts[1].deliveryId, reminder.deliveryId);
+  assert.deepEqual(contexts[1].tools, contract.tools); assert.equal(contexts[1].systemPrompt, contract.systemPrompt);
+  assert.equal(idle()[1].params.deliveryId, reminder.deliveryId);
+  assert.deepEqual(f.rpcs.filter(r => r.method === 'group_chat.send_message').map(r => r.params.content), ['Explicit reply']);
+  assert.deepEqual(resolveThreadPrompt({ ...first, prompt: '' }), formatThreadMessage(first));
+  assert.equal(resolveThreadPrompt({ ...first, prompt: '  ' }), '  ');
+});
+
+test('turn errors report idle with deliveryId', async t => {
+  const f = await fixture(t), errors = [];
+  const bridge = new BridgeClient(f.credentials);
+  const host = new SessionHost(bridge, async () => { throw new Error('runtime failure'); }, { configDir: f.dir, runtime: 'Test', approvalTool: 'test', onError: e => errors.push(e) });
+  t.after(async () => { await host.close(); bridge.close(); });
+  await host.start(); await bridge.start(); const frame = message(); f.send(frame);
+  await until(() => f.rpcs.some(r => r.params.errorMessage));
+  const error = f.rpcs.find(r => r.params.errorMessage);
+  assert.equal(error.params.deliveryId, frame.deliveryId); assert.equal(error.params.state, 'idle');
+  assert.equal(errors[0].message, 'runtime failure');
+});
+
+test('missing ready contract fails the turn before calling a runtime', async t => {
+  const f = await fixture(t), calls = [], errors = [];
+  const bridge = {
+    credentials: f.credentials, getContract: () => undefined,
+    onReady: () => () => {}, onThreadMessage: () => () => {}, onThreadCancel: () => () => {}, onCardAction: () => () => {},
+    rpc: async (method, params) => { calls.push({ method, params }); return {}; },
+  };
+  const host = new SessionHost(bridge, async () => assert.fail('must not run'), { configDir: f.dir, runtime: 'Test', approvalTool: 'test', onError: e => errors.push(e) });
+  await host.start(); t.after(() => host.close()); const frame = message(); host.message(frame);
+  await until(() => calls.some(c => c.params.state === 'idle'));
+  assert.equal(errors[0].message, 'Bridge contract is missing');
+  assert.equal(calls.at(-1).params.deliveryId, frame.deliveryId);
 });

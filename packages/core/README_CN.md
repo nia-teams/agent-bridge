@@ -10,7 +10,13 @@ npm install @nia-teams/agent-bridge-core
 
 AI 指引：[skills/agent-bridge-core/SKILL.md](./skills/agent-bridge-core/SKILL.md) · `node_modules/@nia-teams/agent-bridge-core/skills/agent-bridge-core/SKILL.md`。
 
+邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
+
 ## 一、核心概念
+
+`BridgeClient` 通过 WebSocket 连接，使用 `protocolVersion: 2`。`getContract()` 返回 `ready.systemPrompt` 中的协作提示词与 `ready.tools` 中的工具定义（`name`、`description`、`inputSchema`）。用 `resolveThreadPrompt(frame)` 读取传入提示词。
+
+`TurnRunner` 返回 `void`，通过 `context.send` 发布回复、`context.history` 读取历史。`SessionHost` 不发布返回文本。
 
 `pairHost` 保存主机 Ed25519 凭证，`BridgeClient` 通过 challenge/lease 建立 WebSocket，适配器处理群聊轮次，`PublicationQueue` 发布回复。模型、工具与本地权限由接入方运行时负责。
 
@@ -30,11 +36,11 @@ AI 指引：[skills/agent-bridge-core/SKILL.md](./skills/agent-bridge-core/SKILL
 
 `clientName` trim 后为 1–80 字符且不含控制字符；`avatar` 仅允许
 `data:image/png;base64,...`，解码后的 PNG 文件 ≤64 KiB、尺寸 ≤1024×1024，不接受 SVG
-或远程图片 URL。配对页与群聊身份自动展示对应图标；已配对 Agent 升级并启动后，
-通过验证的 lease 自动同步品牌信息，无需重新配对。省略 lease 字段不清空已有品牌，
+或远程图片 URL。配对页与群聊身份展示对应图标；已配对 Agent 升级并启动后，
+通过验证的 lease 同步品牌信息，无需重新配对。省略 lease 字段不清空已有品牌，
 用户自定义头像优先。API 只返回轻量头像 URL，不内联图片数据。
 
-完整约束见 [协议](./docs/SPECIFICATION.md)。使用品牌功能时，在配对和连接两个入口
+约束见 [协议](./docs/SPECIFICATION.md)。使用品牌功能时，在配对和连接两个入口
 都传入字段；浏览器批准不提前覆盖主机品牌，完成私钥持有证明后才提交。
 
 ## 二、快速开始
@@ -58,17 +64,23 @@ await pairHost({
 ### 2. 接收群聊消息并回复
 
 ```js
-import { BridgeClient, defaultConfigDir, loadCredentials } from '@nia-teams/agent-bridge-core';
+import { BridgeClient, defaultConfigDir, loadCredentials, resolveThreadPrompt } from '@nia-teams/agent-bridge-core';
 
 const configDir = defaultConfigDir('my-agent', 'MY_AGENT_CONFIG_DIR');
 const bridge = new BridgeClient(await loadCredentials(configDir), {
   onError: error => console.error(error.message),
 });
 bridge.onThreadMessage(async frame => {
+  console.log(resolveThreadPrompt(frame));
   await bridge.rpc('group_chat.send_message', {
     sessionId: frame.sessionId,
     toolCallId: frame.deliveryId,
     content: 'Received',
+  });
+  await bridge.rpc('thread.activity', {
+    sessionId: frame.sessionId,
+    state: 'idle',
+    deliveryId: frame.deliveryId,
   });
 });
 bridge.onThreadCancel(() => {});
@@ -78,6 +90,8 @@ process.once('SIGINT', () => bridge.close());
 process.once('SIGTERM', () => bridge.close());
 await bridge.start();
 ```
+
+接入模型时，将 `resolveThreadPrompt(frame)` 与 `bridge.getContract()` 提供的契约交给模型。通过 `group_chat.send_message` 发布回复，轮次结束时通过 `thread.activity` 上报 `state: 'idle'` 和已处理的 `deliveryId`。
 
 随包示例可运行：
 
@@ -107,7 +121,7 @@ node node_modules/@nia-teams/agent-bridge-core/examples/connect.mjs
 | --- | --- |
 | `SessionHost` | 群聊输入队列、会话恢复、取消、人工问答与确认卡 |
 | `runSessionDaemon` | 装配 BridgeClient 与 SessionHost，管理信号退出 |
-| `consumeSdkQuery` | 消费 SDK 事件并提取最终回复 |
+| `consumeSdkQuery` | 消费 SDK 事件并同步会话与状态，不发布文本 |
 | `ThreadMapStore` | 按群聊保存接入方运行时的会话标识 |
 | `IdleSleepGuard` | macOS 上任务执行期间通过 `caffeinate` 防止系统休眠 |
 

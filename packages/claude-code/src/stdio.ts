@@ -9,7 +9,7 @@ import { ChannelServer } from './channel-server.js';
 
 /** The daemon already owns the bridge and supplies its own scoped SDK tools. */
 function idleChannel() {
-  const mcp = new Server({ name: 'nia-teams', version: '0.1.0' }, { capabilities: { tools: {} } });
+  const mcp = new Server({ name: 'nia-teams', version: '0.2.0' }, { capabilities: { tools: {} } });
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
   return { mcp, connect: (transport: Transport) => mcp.connect(transport), close: () => mcp.close() };
 }
@@ -33,7 +33,6 @@ export async function runStdioServer(configDir?: string): Promise<void> {
   watchdog.unref();
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.once(signal, stop);
   process.stdin.once('end', stop); process.stdin.once('close', stop);
-  channel.mcp.onclose = stop;
-  try { await channel.connect(new StdioServerTransport()); }
+  try { await channel.connect(new StdioServerTransport()); channel.mcp.onclose = stop; }
   catch (error) { console.error(`Nia Teams: ${String(error)}`); stop(); }
 }

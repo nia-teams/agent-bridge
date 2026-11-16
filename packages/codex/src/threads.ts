@@ -1,5 +1,5 @@
 import { JsonFileStore } from '@nia-teams/agent-bridge-core';
-export interface ThreadMapping { codexThreadId: string; groupChatId: string; updatedAt: string }
+export interface ThreadMapping { protocolVersion: 2; codexThreadId: string; groupChatId: string; updatedAt: string }
 export class ThreadStore {
   private readonly file: JsonFileStore<Record<string, ThreadMapping>>;
   private values: Record<string, ThreadMapping> = Object.create(null);
@@ -13,6 +13,6 @@ export class ThreadStore {
     });
   }
   async load(): Promise<void> { this.values = await this.file.load(Object.create(null)); }
-  get(id: string): ThreadMapping | undefined { return this.values[id]; }
+  get(id: string): ThreadMapping | undefined { const entry = this.values[id]; return entry?.protocolVersion === 2 ? entry : undefined; }
   set(id: string, entry: ThreadMapping): Promise<void> { this.values[id] = entry; return this.file.save(this.values); }
 }

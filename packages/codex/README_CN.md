@@ -12,6 +12,8 @@ nia-codex start --cwd "." --daemon
 
 AI 编程助手请加载 [skills/nia-teams-codex/SKILL.md](./skills/nia-teams-codex/SKILL.md)；安装后路径为 `node_modules/@nia-teams/codex-bridge/skills/nia-teams-codex/SKILL.md`。
 
+邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
+
 ## 一、产品背景与协作模型
 
 桥接进程通过 `codex app-server` JSON-RPC 驱动本机 Codex。每个群聊使用独立且持久化的线程；团队在群聊中发起任务、查看执行状态并批准命令或文件改动。
@@ -63,7 +65,6 @@ nia-codex pair --name 'My OpenAI Codex'
 
 ```text
 Pairing code: A7F39C2B
-Open this URL to create or bind your external Agent:
 https://nia-teams.com/bridge/agent-pair/A7F39C2B
 ```
 
@@ -117,18 +118,20 @@ pgrep -af '[n]ia-codex.*start'
 
 Codex 的默认 sandbox 是 `read-only`，审批策略是 `on-request`。需要修改项目时可选择 `--sandbox workspace-write`，仍保留工具确认。`danger-full-access` 放开 Codex sandbox；`--full-auto` / `--bypass-approvals` 把审批策略设为 `never`，未指定 sandbox 时改用 `workspace-write`。这两个设置分别控制执行范围和审批，不能互相替代。
 
+流式输出留在本机，思考与工具更新同步活动状态；群聊回复通过 `send_message` 发布。
+
 ### 第 4 步：把外部 Agent 拉进群聊并验证在线状态
 
 点击配对成功页的 **前往群聊**，或打开 [Nia Teams](https://nia-teams.com) 进入左侧 **消息** 页：
 
-- **直接发起新对话**：在消息列表顶部的 Agent 快捷栏点击刚创建的外部 Agent 头像发起对话（Agent 较多时可点快捷栏右侧下箭头展开），或点击快捷栏最右侧的 **`+`**（新建聊天）创建多人群聊。
+- **发起新对话**：在消息列表顶部的 Agent 快捷栏点击刚创建的外部 Agent 头像发起对话（Agent 较多时可点快捷栏右侧下箭头展开），或点击快捷栏最右侧的 **`+`**（新建聊天）创建多人群聊。
 - **拉进已有群聊**：打开已有群聊，点击右上角成员头像旁的 **`+`**（添加聊天成员），在 **邀请已有成员** 弹窗中勾选该外部 Agent 并点击 **完成**。同一组织成员可将组织归属的 Agent 拉入群；「个人助理」仅创建者可拉入群，加入后群内其他成员也可 `@` 它。
 
 进入群聊后，查看底部输入框上方的状态栏：当该外部 Agent 的状态从红色的 **`未连接`** 变为 **`空闲待命`**，说明 OpenAI Codex 桥接进程已经连通就绪。
 
 ### 第 5 步：在群聊中 `@` 它协作与日常管理
 
-在输入框输入 `@` 选中该外部 Agent 并发送任务。执行时状态栏显示 `Thinking…` 或正在运行的工具，轮次结束后，最终回复会发回群聊。后续日常管理按权限分为三类：
+在输入框输入 `@` 选中该外部 Agent 并发送任务。执行时状态栏显示 `Thinking…` 或正在运行的工具，回复发回群聊。后续日常管理按权限分为三类：
 
 - **临时离线（主机侧操作）**：以前台方式运行时，在主机终端按 `Ctrl+C` 停止 `nia-codex start`；后台运行时，对启动时记录的 PID 发送 SIGTERM。群内状态会变为 `未连接`，重新运行 `nia-codex start --cwd /path/to/workspace` 即可恢复连接。
 - **更换主机或解绑主机（需该 Agent 的 `owner` 或 `admin`）**：迁移到新主机时，在新主机执行 `nia-codex pair`，在浏览器配对页切换到 **重绑已有外部 Agent**，选中目标后点击 **确认重新绑定**。若仅需解绑，在它的对话页或共同所在的群聊右上角打开应用菜单（网格图标 **Apps**）→ **Agent 设置**，点击 **解绑主机**。重绑或解绑会递增 `keyGeneration` 使旧主机凭证失效，并以关闭码 `4401` 断开旧连接。
@@ -140,7 +143,7 @@ Codex 的默认 sandbox 是 `read-only`，审批策略是 `on-request`。需要�
 - **`nia-codex status` 报错或绑定不是目标 Agent**：核对当前系统用户、配置目录和服务地址。若尚未完成配对，或旧主机凭证因重绑、解绑而失效，重新执行 `nia-codex pair` 并启动桥接进程。`status` 只显示保存的身份，不代表主机已在线。
 - **群里一直显示红色 `未连接`**：确认 `nia-codex start` 进程仍在运行，检查 `/tmp/nia-codex.log` 中的启动或连接错误，并用 `nia-codex status` 核对群内 Agent 与保存的身份是否一致。若日志出现 `4409`，说明另一个连接接管了同一身份，应检查是否重复启动了进程。
 - **OpenAI Codex 未登录或启动失败**：先在同一系统用户下运行 Codex CLI，完成登录，确认 Node.js 版本和可执行文件路径。模型产品的登录与 Nia Teams 配对是两件事，不能互相替代。
-- **任务已执行但没有回复**：检查日志中的 OpenAI Codex 执行结果和消息发布错误，确认任务没有被取消、群聊会话没有切换，且该轮产生了最终回复。若群聊发送工具已成功发布回复，不会再次发布该轮最终回复。
+- **任务已执行但没有回复**：检查守护进程日志中的运行或消息发布错误，确认任务未被取消，也未因群聊会话切换而中断。
 
 ## 三、CLI 参数、环境变量与包导出
 
@@ -174,7 +177,7 @@ nia-codex --help
 | `dynamicTools` | 群聊发送与历史读取工具定义 |
 | `dist/**/*.d.ts` | 导出函数、配置与运行时接口的类型声明 |
 
-根模块通过具名导出提供接口，公开子路径为 `.` 与 `./package.json`。精确方法签名查询类型声明，运行时协议与 Codex 数据结构见 [docs/SPECIFICATION.md](./docs/SPECIFICATION.md)。
+根模块通过具名导出提供接口，公开子路径为 `.` 与 `./package.json`。方法签名查询类型声明，运行时协议与 Codex 数据结构见 [docs/SPECIFICATION.md](./docs/SPECIFICATION.md)。
 
 嵌入时先构造 `CodexHost(bridge, options)`、注册桥接事件，调用 `await host.start()`，再调用 `await bridge.start()`；退出时关闭连接并等待 `host.close()`。`AppServer` 负责 JSON-RPC，请勿在其 stdout 混入日志。
 
@@ -192,8 +195,8 @@ nia-codex --help
 
 ### 2. 群聊工具、消息与原生提及
 
-- `nia_group_chat_send_message({ content })` 向当前群聊发布 Markdown 或 Rich HTML，常用于进度与提问；发送成功后抑制该轮结束时的最终回复发布。
-- `nia_group_chat_history({ limit?, offset? })` 分页读取历史；`limit` 默认 50、范围 1..100，`offset` 默认 0 且为非负整数。运行时注入当前 Nia session，模型不传目标群聊 ID。
+- `send_message({ content })` 向当前群聊发布 Markdown 或 Rich HTML，常用于进度与提问；所有回复均需显式发送，轮次结束文本保持私有。
+- `chat_history({ limit?, offset? })` 分页读取历史；`limit` 默认 50、范围 1..100，`offset` 默认 0 且为非负整数。运行时注入当前 Nia session，模型不传目标群聊 ID。
 - 群聊工具限定在当前活跃轮次；中断或群聊会话切换后，旧工具请求不能继续向新的群聊会话发布。
 
 传入提示列出 `Members: Alice (<userId>), ...`，消息段列出发送者 ID、时间、消息 ID、回复关系与附件转写。通用消息也可表现为 `[chat:<chatId>] Alice (<userId>): ...`，结构化频道可携带 `senderId`；原始桥接帧字段为 `messages[].authorId`。回复中使用 `<mention userId="24-hex-id" />` 触发原生通知，ID 从发送者或成员列表取得。

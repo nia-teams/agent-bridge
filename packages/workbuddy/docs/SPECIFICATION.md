@@ -20,6 +20,8 @@ a1bd88faf1f7c28d27d5975d2882ccd91d9b9206fdb0c5014d899519619a6aa9  tencent-ai-age
 
 TaskBar cards bind the full tool/input, active turn identity, and card ID through core `verifyCardApproval`, tool `workbuddy.approval`, server `agent-bridge`. UI clicks alone grant nothing. GroupChat tool calls are scoped by host context, not a model-supplied chat/session identifier.
 
+The runner appends `ready.systemPrompt` to SDK instructions and uses server tool descriptions for `send_message` / `chat_history`. SDK result text stays local; replies require explicit `send_message`. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
+
 ## Desktop entrypoint interoperability
 
 `agent-sdk@0.3.300` passes `pathToCodebuddyCode` to its process transport as `executablePath`. The transport rewrites any Unix `bin/codebuddy` suffix to `dist/codebuddy-headless.js` without checking existence, even with `executable`/`executableArgs` specified. It does not rewrite `.mjs`/`.js` entrypoints or dereference symlinks. WorkBuddy.app distributions may ship only `dist/codebuddy-lite-wb.mjs`, so executable discovery normalizes the installation to that readable ESM entrypoint before the single SDK query path. Standard CLI distributions without that bundle retain their original entrypoint. Explicit script entrypoints require readability, not an OS executable bit.

@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { permissionOption, AgyRunner, resolveAgyBinary } from '../dist/runner.js';
 import { McpRelay, callRelay } from '../dist/mcp-relay.js';
-import { fixture } from '../../core/tests/helpers.mjs';
+import { fixture, contract } from '../../core/tests/helpers.mjs';
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL('../bin/nia-agy.mjs', import.meta.url));
 test('permission decisions select only once options, preserve IDs and never widen to always', () => {
@@ -25,19 +25,19 @@ test('invalid modes and nonpositive request timeouts fail before any process sta
 test('MCP loopback capabilities isolate turns, reject destination injection and revoke on finish', async t => {
   const relay = new McpRelay(); await relay.start(); t.after(() => relay.close());
   const calls = [], controller = new AbortController();
-  const context = { signal:controller.signal, send: async content => calls.push(['a',content]), history:async (limit,offset) => ({limit,offset}) };
+  const context = { ...contract, signal:controller.signal, send: async content => calls.push(['a',content]), history:async (limit,offset) => ({limit,offset}) };
   const scope = relay.register(context); const env = Object.fromEntries(scope.env.map(e => [e.name,e.value]));
   const call = (name,args,token=env.NIA_AGY_MCP_TOKEN) => callRelay(name,args,env.NIA_AGY_MCP_URL,token);
-  assert.deepEqual(await call('nia_group_chat_send_message',{content:'hello'}),{sent:true});
-  assert.deepEqual(await call('nia_group_chat_history',{}),{limit:50,offset:0});
-  for (const [name,args] of [['unknown',{}],['nia_group_chat_send_message',{content:'x',group_chat_id:'other'}],['nia_group_chat_send_message',{content:' '}],['nia_group_chat_history',{limit:101}],['nia_group_chat_history',{offset:-1}]]) await assert.rejects(call(name,args));
-  await assert.rejects(call('nia_group_chat_history',{},'wrong-token'));
+  assert.deepEqual(await call('send_message',{content:'hello'}),{ message: '消息已发布到聊天', published: true });
+  assert.deepEqual(await call('chat_history',{}),{limit:50,offset:0});
+  for (const [name,args] of [['unknown',{}],['send_message',{content:'x',group_chat_id:'other'}],['send_message',{content:' '}],['chat_history',{limit:101}],['chat_history',{offset:-1}]]) await assert.rejects(call(name,args));
+  await assert.rejects(call('chat_history',{},'wrong-token'));
   const other = relay.register({...context,send:async content=>calls.push(['b',content])});
   const otherEnv=Object.fromEntries(other.env.map(e=>[e.name,e.value]));
-  await callRelay('nia_group_chat_send_message',{content:'other'},otherEnv.NIA_AGY_MCP_URL,otherEnv.NIA_AGY_MCP_TOKEN);
+  await callRelay('send_message',{content:'other'},otherEnv.NIA_AGY_MCP_URL,otherEnv.NIA_AGY_MCP_TOKEN);
   assert.deepEqual(calls,[['a','hello'],['b','other']]);
-  scope.revoke(); await assert.rejects(call('nia_group_chat_history',{}));
-  controller.abort(); await assert.rejects(callRelay('nia_group_chat_history',{},otherEnv.NIA_AGY_MCP_URL,otherEnv.NIA_AGY_MCP_TOKEN));
+  scope.revoke(); await assert.rejects(call('chat_history',{}));
+  controller.abort(); await assert.rejects(callRelay('chat_history',{},otherEnv.NIA_AGY_MCP_URL,otherEnv.NIA_AGY_MCP_TOKEN));
 });
 for (const url of ['https://127.0.0.1/tool','http://example.com/tool','http://127.0.0.1/wrong','http://user:pass@127.0.0.1/tool','http://127.0.0.1/tool?x=1']) test(`MCP helper rejects non-scoped endpoint ${url}`, async () => { await assert.rejects(callRelay('x',{},url,'token')); });
 test('explicit binary discovery uses the selected executable and fails for missing paths', async t => {

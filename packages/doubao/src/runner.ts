@@ -156,7 +156,7 @@ export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready
         worker.once('disconnect', () => { /* Result IPC precedes a normal disconnect. */ });
         const args = ['sessions', resume ? 'send' : 'create', ...(resume ? [resume] : ['--mode', 'work']),
           '--runtime', runtime, ...(runtime === 'local' ? ['--workspace', options.cwd, '--permission', options.fullAuto ? 'FullAccess' : 'AskOnRisk'] : []),
-          ...(options.model ? ['--model', options.model] : []), '--wait', '--timeout', '120', '--', context.prompt];
+          ...(options.model ? ['--model', options.model] : []), '--wait', '--timeout', '120', '--', (resume ? context.prompt : `${context.systemPrompt}\n\n${context.prompt}`)];
         worker.send({ args, fullAuto: Boolean(options.fullAuto) }, error => { if (error) reject(new Error('Unable to initialize Doubao task worker.')); });
       });
       await persist;
@@ -167,7 +167,8 @@ export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready
       if (result.status !== 'completed') throw new Error(`Doubao turn ${result.status ?? 'unknown'}; restricted operations may need approval. Use --full-auto only if you authorize local file/command execution.`);
       if (typeof result.reply?.text !== 'string' || !result.reply.text.trim()) throw new Error('Doubao completed without assistant reply.text');
       if (Buffer.byteLength(result.reply.text) > 480 * 1024) throw new Error('Doubao output exceeds bridge frame limit');
-      return { text: result.reply.text.trim() };
+      await context.send(result.reply.text.trim());
+      return;
     } finally {
       if (timer) clearTimeout(timer);
       context.signal.removeEventListener('abort', abort);

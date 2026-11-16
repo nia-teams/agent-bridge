@@ -1,5 +1,7 @@
 # Codex app-server protocol contract
 
+The adapter loads `ready.systemPrompt` and dynamic tool definitions from `ready.tools`. Replies require explicit `send_message`; terminal and turn-end text remain private. Persisted thread mappings carry `protocolVersion: 2`; only matching mappings resume. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
+
 ## Source and reproduction
 
 Verified against npm `@openai/codex@0.167.0-linux-x64` (the platform alias used by `@openai/codex@0.167.0`). Evidence in `protocol/` comes from the real binary:
@@ -14,7 +16,7 @@ tar xzf openai-codex-0.167.0-linux-x64.tgz
 
 ## JSONL handshake
 
-One JSON object per newline over stdin/stdout; requests/responses include numeric or string IDs. The bridge sends JSON-RPC 2.0 envelopes. Initialize clientInfo is `{ name: "nia-teams-codex-bridge", title: "Nia Teams Codex Bridge", version: "0.1.0" }` with `capabilities: { experimentalApi: true }`; wait for its response, then notify `initialized` with `{}`.
+One JSON object per newline over stdin/stdout; requests/responses include numeric or string IDs. The bridge sends JSON-RPC 2.0 envelopes. Initialize clientInfo is `{ name: "nia-teams-codex-bridge", title: "Nia Teams Codex Bridge", version: "0.2.0" }` with `capabilities: { experimentalApi: true }`; wait for its response, then notify `initialized` with `{}`.
 
 ## Thread and turn shapes
 
@@ -32,7 +34,7 @@ One JSON object per newline over stdin/stdout; requests/responses include numeri
 
 Server request `item/tool/call`: `{ threadId, turnId, callId, namespace, tool, arguments }`. Response: `{ contentItems: [{ type: "inputText", text }], success: boolean }`. This is not MCP `content`/`isError`.
 
-`nia_group_chat_send_message` accepts `{ content: string }`; `nia_group_chat_history` accepts `{ limit?: 1..100, offset?: integer >= 0 }`. The host supplies the active Nia session ID; models cannot choose another chat/session.
+`send_message` accepts `{ content: string }`; `chat_history` accepts `{ limit?: 1..100, offset?: integer >= 0 }`. The host supplies the active Nia session ID; models cannot choose another chat/session.
 
 ## Approvals
 
@@ -45,7 +47,7 @@ Server request `item/tool/call`: `{ threadId, turnId, callId, namespace, tool, a
 
 TaskBar cards bind `verifyToolName: "codex.approval"`, request arguments and the card ID. `verifyCardApproval` delegates RS256 issuer/audience/signature/expiry and context validation to core's MCP SDK verifier. A UI decision alone grants nothing. Timeout, cancellation, failed verification, turn interruption and session rotation decline pending requests and cancel cards. Unknown server requests receive `-32601`; no implied approval.
 
-Agent Bridge v1 signing and wire shapes are specified in `../../core/docs/SPECIFICATION.md`.
+Agent Bridge v2 signing and wire shapes are specified in `../../core/docs/SPECIFICATION.md`.
 
 ## GroupChat sender identity and mentions
 

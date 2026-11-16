@@ -26,8 +26,8 @@ async function turn() {
  if (prompt.includes('tools')) {
   await mcp('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'mock', version: '1' } });
   await request({ subtype: 'mcp_message', server_name: 'nia', message: { jsonrpc: '2.0', method: 'notifications/initialized' } });
-  log({ kind: 'history', result: await mcp('tools/call', { name: 'nia_group_chat_history', arguments: { limit: 3 } }) });
-  log({ kind: 'send', result: await mcp('tools/call', { name: 'nia_group_chat_send_message', arguments: { content: 'SDK interim' } }) });
+  log({ kind: 'history', result: await mcp('tools/call', { name: 'chat_history', arguments: { limit: 3 } }) });
+  log({ kind: 'send', result: await mcp('tools/call', { name: 'send_message', arguments: { content: 'SDK interim' } }) });
  }
  send({ type: 'assistant', session_id: session, parent_tool_use_id: null, uuid: randomUUID(), message: { id: 'msg', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'SDK final reply' }], model: 'mock', stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } });
  send({ type: 'result', subtype: 'success', is_error: false, session_id: session, uuid: randomUUID(), result: 'SDK final reply', duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, permission_denials: [] });

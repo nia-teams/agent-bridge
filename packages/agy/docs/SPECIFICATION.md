@@ -1,6 +1,8 @@
 # Antigravity ACP adapter contract
 
-Protocol evidence: user-supplied macOS captures from `agy 1.4.10` / `Antigravity ACP Server 1.5.4`. Agent Bridge transport, credential signing, and RS256 confirmation claims follow [core Agent Bridge v1](../../core/docs/SPECIFICATION.md). Example identifiers below are synthetic.
+Protocol evidence: user-supplied macOS captures from `agy 1.4.10` / `Antigravity ACP Server 1.5.4`. Agent Bridge transport, credential signing, and RS256 confirmation claims follow [core Agent Bridge v2](../../core/docs/SPECIFICATION.md). Example identifiers below are synthetic.
+
+Agent Bridge WebSocket uses `protocolVersion: 2`; ACP initialization uses `protocolVersion: 1`. The adapter supplies server instructions on session creation and resume, and server tool definitions to the scoped MCP relay. Core mappings store `v2:<ACP session ID>`; ACP requests use the unprefixed ID. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
 
 ## 1. Process and JSON-RPC framing
 
@@ -12,12 +14,12 @@ Executable precedence: explicit `agyBin` / CLI `--agy-bin`, `AGY_BIN`, `agy` on 
 
 stdin/stdout carry newline-delimited JSON-RPC 2.0. stderr is diagnostic output. The client uses numeric monotonically increasing IDs; server request IDs may be strings or numbers. An inbound `method` denotes a server request/notification even if its ID matches a pending client request. Replies preserve the server ID's type. Unknown server requests receive `-32601`.
 
-Client control requests default to 30 seconds; prompts default to 600 seconds. Constructor options `requestTimeoutMs` / `promptTimeoutMs` accept positive overrides. Timeout, malformed framing, oversized frames, or process exit reject all pending requests in that process generation. Raw frames are limited to 4 MiB; accumulated assistant text to 480 KiB. A later turn may start a new child; a failed prompt is not replayed.
+Client control requests default to 30 seconds; prompts default to 600 seconds. Constructor options `requestTimeoutMs` / `promptTimeoutMs` accept positive overrides. Timeout, malformed framing, oversized frames, or process exit reject all pending requests in that process generation. Raw ACP frames are limited to 4 MiB; assistant text chunks are ignored, not accumulated. A later turn may start a new child; a failed prompt is not replayed.
 
 ## 2. Initialization
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"nia-agy","version":"0.1.0"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"nia-agy","version":"0.2.0"}}}
 ```
 
 The response must contain `result.protocolVersion === 1`. `agentCapabilities`, `agentInfo`, and `authMethods` describe upstream capabilities; authentication remains local to agy. No Codex-style `initialized` notification is added.
@@ -38,12 +40,12 @@ The response must contain `result.protocolVersion === 1`. `agentCapabilities`, `
         {"name": "NIA_AGY_MCP_TOKEN", "value": "<ephemeral turn capability>"}
       ]
     }],
-    "systemPromptAppend": "<core GROUP_CHAT_INSTRUCTIONS>"
+    "systemPromptAppend": "<ready.systemPrompt>"
   }
 }
 ```
 
-`mcpServers[].env` is an array of `{ name: string, value: string }`, not an environment object. The appended instructions include native `<mention userId="member-id" />` syntax and publication/tool rules. A new result must include a nonblank `sessionId`:
+`mcpServers[].env` is an array of `{ name: string, value: string }`, not an environment object. Both session/new and session/resume include `systemPromptAppend: context.systemPrompt`. The appended server instructions include native `<mention userId="member-id" />` syntax and publication/tool rules. A new result must include a nonblank `sessionId`:
 
 ```json
 {"jsonrpc":"2.0","id":2,"result":{"sessionId":"00000000-0000-4000-8000-000000000001","models":{"availableModels":[],"currentModelId":"<upstream-model-id>"},"modes":{"currentModeId":"default","availableModes":[]}}}
@@ -69,14 +71,14 @@ Modes: `default`, `accept-edits`, `auto`, `plan`. `--full-auto` / `--bypass-appr
 ## 4. Prompt and stream
 
 ```json
-{"jsonrpc":"2.0","id":6,"method":"session/prompt","params":{"sessionId":"<sid>","prompt":[{"type":"text","text":"<formatThreadMessage output>"}]}}
+{"jsonrpc":"2.0","id":6,"method":"session/prompt","params":{"sessionId":"<sid>","prompt":[{"type":"text","text":"<resolveThreadPrompt(frame) output>"}]}}
 {"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"<sid>","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello"}}}}
 {"jsonrpc":"2.0","id":6,"result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":1}}}
 ```
 
-Only text `agent_message_chunk` deltas for the active session and child generation are concatenated. `thought_chunk` / `agent_thought_chunk` report thinking activity. `tool_call` / `tool_call_update` with `status: in_progress` report `Running <title || name>…`. Unknown/inactive session notifications are ignored. Only `end_turn` returns a final reply; other stop reasons fail the turn, and aborted turns never publish accumulated text.
+ACP assistant message chunks remain private and are not accumulated for publication. Thought/tool updates report activity. Only explicit `send_message` publishes, while `end_turn` reports idle with `deliveryId`.
 
-Core SessionHost serializes turns within each GroupChat while the adapter multiplexes different ACP sessions over one child. A successful explicit scoped send suppresses duplicate publication of the final reply.
+Core SessionHost serializes per-chat turns; only explicit `send_message` calls publish. Turn-end assistant text is always private.
 
 ## 5. Server permission request
 
@@ -109,8 +111,8 @@ The bundled `dist/mcp-server.js` uses `@modelcontextprotocol/sdk` stdio transpor
 
 | Tool | Arguments | Host operation |
 | --- | --- | --- |
-| `nia_group_chat_send_message` | `{ content: nonblank string }` | `context.send(content)` |
-| `nia_group_chat_history` | `{ limit?: 1..100, offset?: integer >= 0 }` | `context.history(limit, offset)`; defaults 50 / 0 |
+| `send_message` | `{ content: nonblank string }` | `context.send(content)` |
+| `chat_history` | `{ limit?: 1..100, offset?: integer >= 0 }` | `context.history(limit, offset)`; defaults 50 / 0 |
 
 The daemon binds one ephemeral HTTP relay to `127.0.0.1`. Each turn receives a random 256-bit capability; its helper only accesses that host-supplied context, never a model-selected chat/session. Revocation occurs when the turn finishes or aborts. Unknown tools, extra destination fields, invalid pagination, wrong tokens, and stale/aborted contexts fail. Bridge credentials and private keys are not sent to helpers. The URL and token are local process environment, not persistent state. Helpers restrict endpoints to loopback HTTP `/tool` and reject redirects.
 

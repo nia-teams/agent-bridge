@@ -9,7 +9,7 @@ export interface Publication {
   niaSessionId: string;
   toolCallId: string;
   content?: string;
-  activityAfter: { state: 'idle' | 'waiting' | 'executing'; label?: string; errorMessage?: string };
+  activityAfter: { state: 'idle' | 'waiting' | 'executing'; label?: string; errorMessage?: string; deliveryId?: string };
   shouldSyncActivity: () => boolean;
   signal?: AbortSignal;
 }

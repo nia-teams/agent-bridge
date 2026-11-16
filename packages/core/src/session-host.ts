@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { BridgeClient } from './bridge-client.js';
-import type { CardAction, ThreadMessage, ThreadCancel, ActivityState } from './types.js';
+import type { CardAction, ThreadMessage, ThreadCancel, ActivityState, BridgeToolDefinition } from './types.js';
 import { PublicationQueue } from './publications.js';
 import { ThreadMapStore } from './state.js';
 import { IdleSleepGuard } from './process.js';
-import { formatThreadMessage } from './format.js';
-export type SessionBridge = Pick<BridgeClient, 'credentials' | 'rpc' | 'onReady' | 'onThreadMessage' | 'onThreadCancel' | 'onCardAction' | 'verifyCardApproval'>;
+import { resolveThreadPrompt } from './format.js';
+export type SessionBridge = Pick<BridgeClient, 'getContract' | 'credentials' | 'rpc' | 'onReady' | 'onThreadMessage' | 'onThreadCancel' | 'onCardAction' | 'verifyCardApproval'>;
 export interface PermissionDecision { behavior: 'allow' | 'deny'; updatedInput?: Record<string, unknown>; message?: string }
 export interface TurnContext {
+  systemPrompt: string; tools: BridgeToolDefinition[]; deliveryId: string;
   prompt: string; resume?: string; signal: AbortSignal; turnId: string;
   session(id: string): Promise<void>;
   activity(state: ActivityState, label?: string): Promise<void>;
@@ -15,10 +16,10 @@ export interface TurnContext {
   history(limit?: number, offset?: number): Promise<Record<string, unknown>>;
   permission(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<PermissionDecision>;
 }
-export interface TurnResult { text?: string }
+export type TurnResult = void;
 export type TurnRunner = (context: TurnContext) => Promise<TurnResult>;
 export interface SessionHostOptions { clientName?: string; avatar?: string; configDir: string; runtime: string; approvalTool: string; fullAuto?: boolean; approvalTimeoutMs?: number; onError?: (error: Error) => void; maxQueuedMessages?: number }
-interface Active { controller: AbortController; id: string; sent: boolean }
+interface Active { controller: AbortController; id: string }
 interface Thread { frame: ThreadMessage; active?: Active; queue: ThreadMessage[]; worker?: Promise<void>; question?: { userId?: string; questions: Array<{ question: string }>; resolve(input: Record<string, unknown>): void } }
 interface PendingCard { thread: Thread; active: Active; args: Record<string, unknown>; resolve(value: boolean): void }
 
@@ -44,7 +45,7 @@ export class SessionHost {
     if (thread.active !== active || frame.sessionId !== thread.frame.sessionId) return;
     // Progress is best-effort telemetry, not a prerequisite for SDK execution.
     // Final publication/idle ordering remains owned by PublicationQueue.
-    await this.bridge.rpc('thread.activity', { sessionId: frame.sessionId, state, ...(label ? { label } : {}), ...(errorMessage ? { errorMessage } : {}) }, AbortSignal.any([active.controller.signal, AbortSignal.timeout(5000)])).catch(error => this.report(error));
+    await this.bridge.rpc('thread.activity', { sessionId: frame.sessionId, state, ...(state === 'idle' ? { deliveryId: frame.deliveryId } : {}), ...(label ? { label } : {}), ...(errorMessage ? { errorMessage } : {}) }, AbortSignal.any([active.controller.signal, AbortSignal.timeout(5000)])).catch(error => this.report(error));
   }
   message(frame: ThreadMessage): void {
     if (this.closed) throw new Error('Session host is closed');
@@ -77,7 +78,7 @@ export class SessionHost {
   private async drain(thread: Thread): Promise<void> {
     while (thread.queue.length && !this.closed) {
       const frame = thread.queue.shift()!;
-      const active: Active = { controller: new AbortController(), id: randomUUID(), sent: false };
+      const active: Active = { controller: new AbortController(), id: randomUUID() };
       thread.active = active; this.guard();
       const signal = active.controller.signal;
       let idleSynced = false;
@@ -85,13 +86,14 @@ export class SessionHost {
         const saved = this.store.get(frame.agentThreadId);
         if (saved && saved.groupChatId !== frame.groupChatId) throw new Error('Stored session belongs to another GroupChat');
         await this.activity(thread, frame, active, 'executing', `Thinking in ${this.options.runtime}…`);
-        const result = await this.runner({ prompt: formatThreadMessage(frame), resume: saved?.sessionId, signal, turnId: active.id,
+        const contract = this.bridge.getContract();
+        if (!contract) throw new Error('Bridge contract is missing');
+        await this.runner({ ...contract, deliveryId: frame.deliveryId, prompt: resolveThreadPrompt(frame), resume: saved?.sessionId, signal, turnId: active.id,
           session: async id => { signal.throwIfAborted(); if (!id) throw new Error('Empty runtime session id'); await this.store.set(frame.agentThreadId, { sessionId: id, groupChatId: frame.groupChatId, updatedAt: new Date().toISOString() }); },
           activity: (state, label) => this.activity(thread, frame, active, state, label),
           send: async (content, toolCallId = randomUUID()) => {
             signal.throwIfAborted(); if (typeof content !== 'string' || !content.trim()) throw new Error('Message must be nonempty');
             await this.publications.enqueue({ niaSessionId: frame.sessionId, toolCallId: `tool:${active.id}:${toolCallId}`, content, activityAfter: { state: 'executing', label: `Thinking in ${this.options.runtime}…` }, shouldSyncActivity: () => thread.active === active && thread.frame.sessionId === frame.sessionId, signal });
-            active.sent = true;
           },
           history: async (limit = 50, offset = 0) => {
             signal.throwIfAborted();
@@ -101,7 +103,7 @@ export class SessionHost {
           permission: (tool, input, toolSignal) => this.permission(thread, frame, active, tool, input, toolSignal),
         });
         signal.throwIfAborted();
-        await this.publications.enqueue({ niaSessionId: frame.sessionId, toolCallId: `turn:${frame.agentThreadId}:${active.id}`, content: active.sent ? undefined : result.text, activityAfter: { state: 'idle' }, shouldSyncActivity: () => thread.active === active && thread.frame.sessionId === frame.sessionId, signal });
+        await this.publications.enqueue({ niaSessionId: frame.sessionId, toolCallId: `turn:${frame.agentThreadId}:${active.id}`, content: undefined, activityAfter: { state: 'idle', deliveryId: frame.deliveryId }, shouldSyncActivity: () => thread.active === active && thread.frame.sessionId === frame.sessionId, signal });
         idleSynced = true;
       } catch (error) {
         if (!signal.aborted) { idleSynced = true; this.report(error); await this.activity(thread, frame, active, 'idle', undefined, String(error)).catch(e => this.report(e)); }

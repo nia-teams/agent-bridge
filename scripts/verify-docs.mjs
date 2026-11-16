@@ -35,7 +35,7 @@ test('adapter guides name their runtime and describe the browser pairing complet
   for (const name of ['codex', 'workbuddy', 'doubao', 'agy']) {
     const text = await read(`packages/${name}/README_CN.md`);
     assert.ok(!text.includes('上游'), `${name}: name the product in its own guide`);
-    for (const label of ['任意设备的浏览器', '新建外部 Agent', 'Paired: <Agent 名称> (@external-...)', '直接发起新对话', '拉进已有群聊', '临时离线', '更换主机或解绑主机', '停用归档', '常见问题排查']) assert.ok(text.includes(label), `${name}: missing ${label}`);
+    for (const label of ['任意设备的浏览器', '新建外部 Agent', 'Paired: <Agent 名称> (@external-...)', '发起新对话', '拉进已有群聊', '临时离线', '更换主机或解绑主机', '停用归档', '常见问题排查']) assert.ok(text.includes(label), `${name}: missing ${label}`);
   }
   const claude = await read('packages/claude-code/README_CN.md');
   const pairing = claude.slice(claude.indexOf('### 第 2 步：'), claude.indexOf('### 第 3 步：'));
@@ -148,5 +148,47 @@ test('daemon guides document portable launch, private logs, and readiness checks
     const text = await read(path);
     assert.match(text, /<nia-cli> start --cwd .* --daemon/);
     assert.match(text, /--log-file/);
+  }
+});
+
+
+test('protocol documentation distinguishes ACP initialization from Agent Bridge transport', async () => {
+  for (const path of ['packages/agy/README.md', 'packages/agy/README_CN.md']) {
+    const text = await read(path);
+    assert.match(text, /ACP[^\n]*protocolVersion: 1/);
+    assert.doesNotMatch(text, /ACP[^\n]*protocolVersion: 2/);
+  }
+  const specification = await read('packages/agy/docs/SPECIFICATION.md');
+  assert.match(specification, /ACP[^\n]*protocolVersion: 1/);
+  assert.match(specification, /WebSocket[^\n]*protocolVersion: 2/);
+  assert.match(specification, /"method":"initialize","params":\{"protocolVersion":1/);
+});
+
+test('documentation contains no appended protocol boilerplate or stale tool names', async () => {
+  for (const path of paths) {
+    const text = await read(path);
+    assert.doesNotMatch(text, /^## (?:Protocol v2|协议 v2)/m, path);
+    assert.doesNotMatch(text, new RegExp('nia_' + 'group_chat_(?:send_message|history)'), path);
+    assert.doesNotMatch(text, /^title:/m, path);
+  }
+});
+
+test('Chinese guides use Chinese prose and section headings', async () => {
+  for (const path of paths.filter(path => /(?:README_CN|INVITE-CONNECT_CN)\.md$/.test(path))) {
+    const text = (await read(path)).replace(/^```[^\n]*\n[\s\S]*?^```/gm, '');
+    for (const line of text.split('\n')) {
+      if (/^#{2,} /.test(line) && !(path === 'README_CN.md' && /^### [1-6]\. /.test(line))) assert.match(line, /[\u4e00-\u9fff]/, `${path}: ${line}`);
+      assert.doesNotMatch(line, /(?:绝不|一律|严格|无缝|确保|完整|精确)/, path);
+      assert.ok(!/^[A-Za-z][^\u4e00-\u9fff]*[.!]$/.test(line), `${path}: untranslated prose: ${line}`);
+    }
+  }
+});
+
+
+test('user-facing adapter guides omit internal wire fields', async () => {
+  const guides = ['README.md', 'README_CN.md', ...adapters.flatMap(name =>
+    [`packages/${name}/README.md`, `packages/${name}/README_CN.md`])];
+  for (const path of guides) {
+    assert.doesNotMatch(await read(path), /ready\.systemPrompt|ready\.tools|protocolVersion:\s*2|deliveryId|silent-turn|`v2:/, path);
   }
 });

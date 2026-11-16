@@ -10,7 +10,7 @@ async function dir(t) { const d = await mkdtemp(join(tmpdir(), 'nia-codex-unit-'
 
 test('ThreadStore persists concurrent updates and reloads with private modes', async t => {
   const d = await dir(t), store = new ThreadStore(d); await store.load();
-  const a = { codexThreadId: 'a', groupChatId: 'group-a', updatedAt: new Date().toISOString() }, b = { ...a, codexThreadId: 'b' };
+  const a = { protocolVersion: 2, codexThreadId: 'a', groupChatId: 'group-a', updatedAt: new Date().toISOString() }, b = { ...a, codexThreadId: 'b' };
   await Promise.all([store.set('a', a), store.set('b', b)]);
   const reloaded = new ThreadStore(d); await reloaded.load();
   assert.deepEqual(reloaded.get('a'), a); assert.deepEqual(reloaded.get('b'), b);
@@ -23,7 +23,7 @@ test('ThreadStore rejects symlink targets on read and write without overwriting 
   await symlink(target, join(d, 'threads.json'));
   const store = new ThreadStore(d);
   await assert.rejects(store.load(), /private regular file/);
-  await assert.rejects(store.set('a', { codexThreadId: 'a', groupChatId: 'g', updatedAt: 'now' }), /Invalid threads/);
+  await assert.rejects(store.set('a', { protocolVersion: 2, codexThreadId: 'a', groupChatId: 'g', updatedAt: 'now' }), /Invalid threads/);
   assert.equal(await readFile(target, 'utf8'), '{}');
 });
 
@@ -60,4 +60,13 @@ test('AppServer launches a non-executable JS entrypoint through Node', async t =
   t.after(() => app.close());
   await app.start();
   assert.ok(app.pid);
+});
+
+
+test('ThreadStore ignores legacy and wrong-version mappings without losing valid v2 mappings', async t => {
+  const d = await dir(t), base = { codexThreadId: 'legacy', groupChatId: 'group', updatedAt: 'now' };
+  await writeFile(join(d, 'threads.json'), JSON.stringify({ old: base, v1: { ...base, protocolVersion: 1 }, current: { ...base, protocolVersion: 2 } }), { mode: 0o600 });
+  const store = new ThreadStore(d); await store.load();
+  assert.equal(store.get('old'), undefined); assert.equal(store.get('v1'), undefined);
+  assert.equal(store.get('current').protocolVersion, 2);
 });
