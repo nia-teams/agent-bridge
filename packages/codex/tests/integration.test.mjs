@@ -38,7 +38,7 @@ test('stdio initialize → thread/start → turn/start → private agentMessage 
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
   const entries = await log();
   assert.deepEqual(entries.slice(0, 2).map(m => m.method), ['initialize', 'initialized']);
-  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.3.0' });
+  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.3.1' });
   assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length, 0);
   await host.message(message('second hold'));
   assert.equal((await log()).filter(m => m.method === 'thread/resume').length, 1);
@@ -223,17 +223,28 @@ for (const provider of ['openai', 'deepseek']) test(`provider ${provider}: defer
   const ids = await active();
   let entries = await log();
   const dynamic = entries.find(m => m.method === 'thread/start').params.dynamicTools;
-  assert.equal(dynamic.at(-1).name, tool.name);
-  assert.deepEqual(dynamic.at(-1).inputSchema, tool.inputSchema);
-  assert.equal(dynamic.at(-1).deferLoading, provider === 'openai' ? true : undefined);
+  if (provider === 'openai') {
+    assert.equal(dynamic.at(-1).type, 'namespace');
+    assert.equal(dynamic.at(-1).name, 'nia');
+    assert.equal(dynamic.at(-1).tools[0].name, tool.name);
+    assert.deepEqual(dynamic.at(-1).tools[0].inputSchema, tool.inputSchema);
+    assert.equal(dynamic.at(-1).tools[0].deferLoading, true);
+  } else {
+    assert.equal(dynamic.at(-1).type, 'function');
+    assert.equal(dynamic.at(-1).name, tool.name);
+    assert.deepEqual(dynamic.at(-1).inputSchema, tool.inputSchema);
+    assert.equal(dynamic.at(-1).deferLoading, undefined);
+  }
   assert.ok(entries.findIndex(m => m.method === 'config/read') < entries.findIndex(m => m.method === 'thread/start'));
   f.handleRpc = (frame, ws) => {
     if (frame.method !== 'tool.call' || frame.params.name !== tool.name) return false;
     ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: frame.requestId, ok: true, result: { content: '{"formatted":true}', isError: true } })); return true;
   };
-  await emit({ id: 'future', method: 'item/tool/call', params: { ...ids, callId: 'future-id', tool: tool.name, arguments: { value: 'x' } } });
+  await emit({ id: 'future', method: 'item/tool/call', params: { ...ids, callId: 'future-id', namespace: provider === 'openai' ? 'nia' : null, tool: tool.name, arguments: { value: 'x' } } });
   const result = (await waitResponse(log, 'future')).result;
   assert.deepEqual(result, { contentItems: [{ type: 'inputText', text: '{"formatted":true}' }], success: false });
+  await emit({ id: 'wrong-ns', method: 'item/tool/call', params: { ...ids, callId: 'wrong-ns-id', namespace: 'other', tool: tool.name, arguments: { value: 'x' } } });
+  assert.equal((await waitResponse(log, 'wrong-ns')).result.success, false);
   const rpc = f.rpcs.find(r => r.params.name === tool.name); assert.equal(rpc.params.toolCallId, 'future-id'); assert.deepEqual(rpc.params.arguments, { value: 'x' });
   await emit(complete(ids)); await until(() => f.rpcs.some(r => r.params.state === 'idle'));
   const stored = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'))[agentThreadId]; assert.match(stored.toolsFingerprint, /^[a-f0-9]{64}$/); assert.equal(stored.protocolVersion, 3);

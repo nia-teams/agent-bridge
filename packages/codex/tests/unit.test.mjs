@@ -74,11 +74,17 @@ test('ThreadStore ignores legacy and wrong-version mappings without losing valid
 test('canonical tool fingerprints ignore object-key order, preserve schema/tool changes and provider loading semantics', async () => {
   const { dynamicToolSpecs, toolsFingerprint } = await import('../dist/host.js');
   const tool = { name: 'future', description: 'Future', inputSchema: { type: 'object', properties: { value: { type: 'string' } } }, deferLoading: true };
-  assert.equal(dynamicToolSpecs([tool], 'openai')[0].deferLoading, true);
-  for (const provider of ['deepseek', 'azure', 'custom']) assert.equal(Object.hasOwn(dynamicToolSpecs([tool], provider)[0], 'deferLoading'), false);
-  const a = dynamicToolSpecs([tool], 'openai');
-  const b = [{ inputSchema: { properties: { value: { type: 'string' } }, type: 'object' }, deferLoading: true, description: 'Future', name: 'future', type: 'function' }];
-  assert.equal(toolsFingerprint(a), toolsFingerprint(b));
-  assert.notEqual(toolsFingerprint(a), toolsFingerprint(dynamicToolSpecs([{ ...tool, description: 'Changed' }], 'openai')));
-  assert.notEqual(toolsFingerprint(a), toolsFingerprint(dynamicToolSpecs([tool], 'deepseek')));
+  const openaiSpecs = dynamicToolSpecs([tool], 'openai');
+  assert.equal(openaiSpecs[0].type, 'namespace');
+  assert.equal(openaiSpecs[0].name, 'nia');
+  assert.equal(openaiSpecs[0].tools[0].deferLoading, true);
+  for (const provider of ['deepseek', 'azure', 'custom']) {
+    const specs = dynamicToolSpecs([tool], provider);
+    assert.equal(specs[0].type, 'function');
+    assert.equal(Object.hasOwn(specs[0], 'deferLoading'), false);
+  }
+  const b = [{ tools: [{ inputSchema: { properties: { value: { type: 'string' } }, type: 'object' }, deferLoading: true, description: 'Future', name: 'future', type: 'function' }], description: openaiSpecs[0].description, name: 'nia', type: 'namespace' }];
+  assert.equal(toolsFingerprint(openaiSpecs), toolsFingerprint(b));
+  assert.notEqual(toolsFingerprint(openaiSpecs), toolsFingerprint(dynamicToolSpecs([{ ...tool, description: 'Changed' }], 'openai')));
+  assert.notEqual(toolsFingerprint(openaiSpecs), toolsFingerprint(dynamicToolSpecs([tool], 'deepseek')));
 });

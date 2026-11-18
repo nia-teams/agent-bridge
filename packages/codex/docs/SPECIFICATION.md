@@ -16,13 +16,13 @@ tar xzf openai-codex-0.167.0-linux-x64.tgz
 
 ## JSONL handshake
 
-One JSON object per newline over stdin/stdout; requests/responses include numeric or string IDs. The bridge sends JSON-RPC 2.0 envelopes. Initialize clientInfo is `{ name: "nia-teams-codex-bridge", title: "Nia Teams Codex Bridge", version: "0.3.0" }` with `capabilities: { experimentalApi: true }`; wait for its response, then notify `initialized` with `{}`.
+One JSON object per newline over stdin/stdout; requests/responses include numeric or string IDs. The bridge sends JSON-RPC 2.0 envelopes. Initialize clientInfo is `{ name: "nia-teams-codex-bridge", title: "Nia Teams Codex Bridge", version: "0.3.1" }` with `capabilities: { experimentalApi: true }`; wait for its response, then notify `initialized` with `{}`.
 
 ## Thread and turn shapes
 
 - `config/read`: `{ includeLayers: false, cwd }` resolves the effective `config.model_provider` before thread creation. `deferLoading: true` is passed only for provider `openai`; other providers receive normal dynamic tools (Codex #44984).
 - `thread/start`: `cwd`, `model`, `developerInstructions`, `approvalPolicy`, `approvalsReviewer`, `sandbox`, `dynamicTools`. Response is `{ thread: { id, ... }, ... }`; the adapter also accepts `threadId` for an external compatibility window requested by the integration contract.
-- Dynamic tool specs require **`type: "function"`**, `name`, `description`, `inputSchema` in 0.167.0. Optional `deferLoading: true` is preserved for the OpenAI provider. Flat specs without `type` are not this schema.
+- Dynamic tool specs in 0.167.0: immediate tools use top-level **`type: "function"`**, `name`, `description`, `inputSchema`. Deferred tools (`deferLoading: true` for the OpenAI provider) must be grouped inside `{ type: "namespace", name: "nia", description, tools: [{ type: "function", name, description, inputSchema, deferLoading: true }, ...] }` because `codex app-server` rejects top-level deferred dynamic functions without a namespace. Flat specs without `type` are not this schema.
 - `thread/resume`: `threadId` and runtime overrides. **No `dynamicTools` parameter**; tools belong to the saved thread. Response contains `thread.id`.
 - `turn/start`: `threadId`, `input: [{ type: "text", text, text_elements: [] }]`. The generated text input includes **`text_elements`**. Response contains `turn.id`.
 - `turn/steer`: `threadId`, `input`, **`expectedTurnId` required**.

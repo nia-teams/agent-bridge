@@ -15,7 +15,18 @@ createInterface({ input: process.stdin }).on('line', line => {
   else if (!initialized) send({ id: m.id, error: { code: -1, message: 'Missing initialized' } });
   else if (m.method === 'config/read') reply({ config: { model_provider: provider } });
   else if (m.method === 'thread/start') {
-    if (!m.params.dynamicTools?.every(t => t.type === 'function' && t.inputSchema)) throw new Error('Incorrect dynamic tool shape');
+    for (const t of m.params.dynamicTools ?? []) {
+      if (t.type === 'function') {
+        if (!t.inputSchema) throw new Error('Incorrect dynamic tool shape');
+        if (t.deferLoading) { send({ id: m.id, error: { code: -32602, message: `deferred dynamic tool must include a namespace: ${t.name}` } }); return; }
+      } else if (t.type === 'namespace') {
+        if (!t.name || !t.description || !Array.isArray(t.tools) || !t.tools.length || !t.tools.every(fn => fn.type === 'function' && fn.inputSchema)) {
+          throw new Error('Incorrect dynamic tool namespace shape');
+        }
+      } else {
+        throw new Error('Incorrect dynamic tool shape');
+      }
+    }
     reply({ thread: { id: `codex-${++n}` } });
   } else if (m.method === 'thread/resume') {
     if (failResume) { failResume = false; send({ id: m.id, error: { code: -1, message: 'Rollout missing' } }); }

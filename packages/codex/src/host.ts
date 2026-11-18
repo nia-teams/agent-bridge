@@ -8,8 +8,16 @@ export function canonicalJson(value: unknown): string {
   if (value && typeof value === 'object') return '{' + Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => JSON.stringify(key) + ':' + canonicalJson(item)).join(',') + '}';
   return JSON.stringify(value);
 }
+const NIA_TOOL_NAMESPACE = 'nia';
+const NIA_TOOL_NAMESPACE_DESCRIPTION = 'Nia Teams GroupChat collaboration tools for reading or searching conversations, looking up organization members, creating chats or inviting members, canceling pending cards, reading share links, and invoking routines.';
+
 export function dynamicToolSpecs(tools: import('@nia-teams/agent-bridge-core').BridgeToolDefinition[], provider: string) {
-  return tools.map(({ name, description, inputSchema, deferLoading }) => ({ type: 'function', name, description, inputSchema, ...(provider === 'openai' && deferLoading ? { deferLoading: true } : {}) }));
+  if (provider !== 'openai') {
+    return tools.map(({ name, description, inputSchema }) => ({ type: 'function' as const, name, description, inputSchema }));
+  }
+  const immediate = tools.filter(t => !t.deferLoading).map(({ name, description, inputSchema }) => ({ type: 'function' as const, name, description, inputSchema }));
+  const deferred = tools.filter(t => t.deferLoading).map(({ name, description, inputSchema }) => ({ type: 'function' as const, name, description, inputSchema, deferLoading: true as const }));
+  return deferred.length ? [...immediate, { type: 'namespace' as const, name: NIA_TOOL_NAMESPACE, description: NIA_TOOL_NAMESPACE_DESCRIPTION, tools: deferred }] : immediate;
 }
 export function toolsFingerprint(tools: unknown): string { return createHash('sha256').update(canonicalJson(tools)).digest('hex'); }
 
@@ -160,6 +168,7 @@ export class CodexHost {
       const turn = thread.turn;
       const args = p.arguments;
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Expected object arguments');
+      if (p.namespace !== null && p.namespace !== undefined && p.namespace !== NIA_TOOL_NAMESPACE) throw new Error('Unknown GroupChat tool namespace');
       const contract = this.bridge.getContract();
       if (!contract?.tools.some(tool => tool.name === p.tool)) throw new Error('Unknown GroupChat tool');
       let content: string; let isError = false;
