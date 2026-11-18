@@ -5,8 +5,8 @@ import { stat, chmod, readFile, mkdir, symlink, readdir, writeFile, lstat } from
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
 import { pairWithNiaTeams, loadCredentials, saveCredentials, stableExternalAgentThreadId } from '../dist/index.js';
-import { fixture, teamId, groupChatId } from './helpers.mjs';
-import { registrationMessage, challengeMessage } from '../dist/crypto.js';
+import { fixture, teamId, groupChatId } from '../../core/tests/helpers.mjs';
+import { registrationMessage, challengeMessage } from '@nia-teams/agent-bridge-core/crypto';
 const exec = promisify(execFile);
 
 test('canonical signing strings and deterministic thread ID match byte fixtures', () => {

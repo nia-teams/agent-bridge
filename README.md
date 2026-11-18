@@ -45,7 +45,7 @@ For `connect --invite-code`, see [invite-code onboarding](./docs/INVITE-CONNECT.
 | --- | --- | --- | --- |
 | `@nia-teams/agent-bridge-core` | Custom Node.js Agent | `BridgeClient` SDK | [README](./packages/core/README.md) · [skills/agent-bridge-core/SKILL.md](./packages/core/skills/agent-bridge-core/SKILL.md) |
 | `@nia-teams/codex-bridge` | OpenAI Codex | `nia-codex` | [README](./packages/codex/README.md) · [skills/nia-teams-codex/SKILL.md](./packages/codex/skills/nia-teams-codex/SKILL.md) |
-| `@nia-teams/claude-code-plugin` | Claude Code: SDK daemon / interactive Channel | `nia-claude` | [README](./packages/claude-code/README.md) · [skills/nia-teams-claude-code/SKILL.md](./packages/claude-code/skills/nia-teams-claude-code/SKILL.md) |
+| `@nia-teams/claude-code-plugin` | Claude Code: SDK daemon | `nia-claude` | [README](./packages/claude-code/README.md) · [skills/nia-teams-claude-code/SKILL.md](./packages/claude-code/skills/nia-teams-claude-code/SKILL.md) |
 | `@nia-teams/workbuddy-plugin` | WorkBuddy / CodeBuddy | `nia-workbuddy` | [README](./packages/workbuddy/README.md) · [skills/nia-teams-workbuddy/SKILL.md](./packages/workbuddy/skills/nia-teams-workbuddy/SKILL.md) |
 | `@nia-teams/doubao-bridge` | Doubao desktop CDP + HTTP runtime / official CLI | `nia-doubao` | [README](./packages/doubao/README.md) · [skills/nia-teams-doubao/SKILL.md](./packages/doubao/skills/nia-teams-doubao/SKILL.md) |
 | `@nia-teams/dsh-plugin` | DeepSeek Harness | `nia-dsh` pairs; `dsh web` runs | [README](./packages/dsh/README.md) · [skills/nia-teams-dsh/SKILL.md](./packages/dsh/skills/nia-teams-dsh/SKILL.md) |
@@ -80,7 +80,6 @@ Branding is optional: `clientName` is trimmed to 1–80 characters; `avatar` is 
 | --- | --- | --- | --- |
 | Codex | `codex app-server` JSON-RPC | Persistent Codex thread per chat | Command/file requests become TaskBar cards |
 | Claude Code daemon | Claude Agent SDK `query()` | Independent SDK session per chat | Forwarded SDK requests become TaskBar cards |
-| Claude Code Channel | `claude/channel` MCP notifications | Shared interactive-host context | `claude/channel/permission` and terminal relay |
 | WorkBuddy / CodeBuddy | CodeBuddy Agent SDK | Independent SDK session per chat | Forwarded SDK requests become TaskBar cards |
 | Doubao | Desktop cookies + HTTP runtime or official CLI | Backend-prefixed persistent sessions | Upstream AskOnRisk / FullAccess or CLI permission mode |
 | DSH | DeepSeek Harness / Cordis services | Independent Harness session per chat | Tool and approval-question requests become TaskBar cards |
@@ -200,14 +199,10 @@ nia-codex start --cwd "/path/to/workspace" --daemon
 
 ### 2. Claude Code (`@nia-teams/claude-code-plugin`)
 
-Daemon mode uses Claude Agent SDK, persists per-chat SDK sessions, adds `--strict-mcp-config`, and displays tool permission requests as TaskBar confirmation cards. Channel mode delivers into an interactive host and shares its context with local Channel consent. Choose one mode per paired directory.
+The SDK daemon uses Claude Agent SDK, persists per-chat sessions, and displays tool permission requests in TaskBar. Use `--model` to select a model, `--full-auto` to bypass bridge confirmations, or `--claude-bin` to select a local executable.
 
 ```sh
 nia-claude start --cwd "/path/to/workspace" --daemon
-# Interactive Channel alternative:
-claude plugin marketplace add nia-teams/agent-bridge
-claude plugin install nia-teams@nia-teams --scope user
-claude --dangerously-load-development-channels plugin:nia-teams@nia-teams
 ```
 
 ### 3. WorkBuddy / CodeBuddy (`@nia-teams/workbuddy-plugin`)
@@ -276,7 +271,7 @@ Alice (<userId>) [<messageId>] <timestamp>:
 Please review the current changes.
 ```
 
-Generic messages may use `[chat:<chatId>] Alice (<userId>): ...`, or a structured channel may expose `senderId`. Publish `<mention userId="24-hex-id" />` for a real notification, filling it from a received sender/member ID rather than guessing by display name. Use `send_message` for GroupChat replies; Claude Channel also requires the notification’s `group_chat_id`.
+Generic messages may use `[chat:<chatId>] Alice (<userId>): ...`, or a structured channel may expose `senderId`. Publish `<mention userId="24-hex-id" />` for a real notification, filling it from a received sender/member ID rather than guessing by display name. Use `send_message` for GroupChat replies.
 
 For TaskBar approval, Nia Teams checks Agent membership before signing an RS256 `nia/confirmationToken`. The host uses `@nia-teams/mcp-sdk/auth` and `${issuer}/oauth2/jwks` to verify signature, issuer, audience, lifetime, service identity, human confirmation, card ID, tool, and canonical-JSON argument SHA-256 digest. Each card binds one pending operation; chat text saying “allow” or a role field does not replace signature validation.
 
@@ -288,7 +283,7 @@ The host config directory stores Ed25519 private keys and paired identity with `
 packages/
   core/          Agent Bridge transport, credentials, publications, SessionHost
   codex/         Codex app-server adapter
-  claude-code/   Claude SDK daemon and MCP Channel
+  claude-code/   Claude SDK daemon
   workbuddy/     CodeBuddy SDK and desktop authentication
   doubao/        Desktop-authenticated HTTP runtime and official CLI
   dsh/           DeepSeek Harness / Cordis plugin

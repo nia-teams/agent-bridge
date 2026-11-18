@@ -2,207 +2,222 @@
 
 [English](./README.md) | 简体中文
 
-把本地或远程 **Claude Code**（以及兼容 `claude/channel` 的宿主如 CodeBuddy CLI）接入到 [Nia Teams](https://nia-teams.com) 里，作为一个 Nia Teams 里的 Agent 与群聊成员**双向通讯**。
+把本地或远程 **Claude Code** 接入 [Nia Teams](https://nia-teams.com)，作为群聊 Agent 与团队成员**双向通讯**。
 
 ```sh
 npm install -g @nia-teams/claude-code-plugin
-nia-claude pair --name "My Claude"
+nia-claude pair --name 'My Claude Code'
 nia-claude start --cwd "." --daemon
 ```
 
-交互式 Channel 的安装方式：
-
-```sh
-claude plugin marketplace add nia-teams/agent-bridge
-claude plugin install nia-teams@nia-teams --scope user
-npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
-```
-
-AI 编程助手请加载 [`./skills/nia-teams-claude-code/SKILL.md`](./skills/nia-teams-claude-code/SKILL.md)；npm 安装后路径为 `node_modules/@nia-teams/claude-code-plugin/skills/nia-teams-claude-code/SKILL.md`。Claude Code 插件中的 Skill 名称为 `/nia-teams:nia-teams-claude-code`。
-
-[English](./README.md) · [协议规范](./docs/SPECIFICATION.md) · [维护说明](./AGENTS.md)
+AI 编程助手请加载 [skills/nia-teams-claude-code/SKILL.md](./skills/nia-teams-claude-code/SKILL.md)；安装后路径为 `node_modules/@nia-teams/claude-code-plugin/skills/nia-teams-claude-code/SKILL.md`。
 
 邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
 
-## 产品与协作边界
+## 一、产品背景与协作模型
 
-[Nia Teams](https://nia-teams.com) 提供人类与 Agent 共同参与的 GroupChat。消息时间线呈现已发布回复，输入框上方的活动状态显示执行中、等待确认或空闲；TaskBar 在输入框附近呈现特定工具调用的确认卡。配对将主机密钥绑定到一个外部 Agent 身份，模型、代码目录与工具仍由你自己的电脑或服务器运行。
+本包通过 Claude Agent SDK 执行任务，复用 Claude Code CLI 的本机登录。群聊各自保存会话，团队成员通过 TaskBar 确认工具请求。
 
-![Production Ops 群聊中的 claude-host、Bash 确认卡与实时等待状态](./docs/assets/group-chat-overview.png)
+- **一步创建并绑定，无需预先建 Agent 或配置 API Key**：在主机终端运行配对命令，在任意设备的浏览器打开生成的链接并登录 Nia Teams，即可新建外部 Agent 并绑定主机公钥。
+- **群聊实时状态与多轮会话隔离**：群聊底部显示该外部 Agent 的在线状态（`未连接`、`空闲待命`、`Thinking…`、`等待确认`）。每个群聊使用独立的 Claude Code 会话，后续任务沿用该群聊上下文；各群聊共享主机上的代码目录。
+- **TaskBar 权限确认与提问交互**：当 Claude Code 请求执行命令、修改文件等操作的权限时，群聊底部 TaskBar 会弹出权限确认卡。该 Agent 的成员可点击 **允许执行**；普通提问在群消息中等待回复。
 
-| 组件 | 职责 |
-| --- | --- |
-| Claude Code Host | 模型会话、工作目录、本地工具、sandbox、终端权限提示与执行 |
-| `@nia-teams/claude-code-plugin` | 认证连接、Channel 通知、群聊回复与历史工具、活动续租、权限验签转发 |
-| Nia Teams | 群聊成员管理、外部 Agent 配对、TaskBar UI、审批授权与签名确认 |
+![Nia Teams 群聊与 Agent 活动状态](./docs/assets/group-chat-overview.png)
 
-`nia-claude start` 通过 `@anthropic-ai/claude-agent-sdk` 调用本地 Claude CLI，为每个群聊保存独立会话，需要工具权限时在 TaskBar 弹出权限确认卡。交互式 Channel 模式中，MCP 提供 stdio 与工具发现，`claude/channel` 提供宿主事件，`claude/channel/permission` 提供权限转发，Agent Bridge 提供 Nia Teams 认证消息与确认卡。Channel 模式由交互宿主运行模型，后台模式通过 SDK 启动本地 Claude CLI。两种方式均不开放公网 HTTP 监听端口；工具执行受所选权限模式约束。
+| 模块 | 本地宿主 | 本包 | Nia Teams |
+| --- | --- | --- | --- |
+| Agent 运行时 | 模型、工具、工作目录与 Claude Code 登录 | 群聊到运行时会话映射、查询与取消 | 外部 Agent 身份与归属 |
+| 连接与认证 | 本机 Node.js 进程与 Claude Code CLI | Ed25519 凭证、WebSocket 长连接与重连 | 浏览器配对、challenge/lease 与消息投递 |
+| 群聊对话 | 推理轮次与本地任务 | 提示格式、会话恢复与回复发布 | 群聊时间线、成员与活动状态 |
+| 人工确认与安全边界 | Claude Code 工具权限与执行范围 | 将工具权限请求显示为 TaskBar 确认卡、RS256 验签与请求匹配 | TaskBar 卡片、Agent 成员权限与签名 |
 
-## 快速接入
+## 二、五步快速接入（从零到在群里对话）
 
-### 第 1 步：安装 CLI 或全局插件
+前提条件：运行桥接的主机已安装 Node.js 20+，并已在同一系统用户下完成 Claude Code CLI 的登录；还需要一个 [Nia Teams](https://nia-teams.com) 账号，不需要提前创建 Agent。
 
-需要 Node.js 20+、Nia Teams 账号与已登录的本地 Claude CLI。后台模式安装：
+### 第 1 步：安装桥接包与准备宿主环境
+
+在同一系统用户下安装并登录 Claude Code CLI，然后安装桥接包：
 
 ```sh
 npm install -g @nia-teams/claude-code-plugin
 ```
 
-交互式 Channel 模式使用支持 Channels 与 Permission Relay 的 Claude Code 版本。Channels 处于 research preview，账号、组织策略与宿主版本均可能限制启用。建议使用当前版本；Claude Code 文档说明 v2.1.234 起权限转发受已注册 Channel 门禁约束。
+桥接通过 PATH 和常见安装目录查找 `claude`。使用 `--claude-bin` 或 `CLAUDE_BIN` 指定可执行文件；SDK 使用 `pathToClaudeCodeExecutable`。本机 Claude Code 登录与 Nia Teams 配对分别管理。
+
+### 第 2 步：发起主机配对并在浏览器创建 Agent
 
 ```sh
-claude plugin marketplace add nia-teams/agent-bridge
-claude plugin install nia-teams@nia-teams --scope user
+nia-claude status
 ```
 
-本机安装一次，对所有工作目录生效。插件自带 MCP 启动配置（`.mcp.json`），并显式注册 `/nia-teams:nia-teams-claude-code`；**无需在业务代码仓库创建任何配置文件**。本仓库的 marketplace manifest 登记 `nia-teams@nia-teams`，无需另建 marketplace 仓库。
-
-不使用插件系统时，等价的用户级注册命令是 `claude mcp add --scope user nia-teams -- npx -y @nia-teams/claude-code-plugin mcp`（兼容宿主如 CodeBuddy CLI 可将 `claude` 替换为 `codebuddy`）；本地源码调试先运行 `npm ci && npm run build`，再使用 `claude mcp add --scope user nia-teams -- node /absolute/path/to/agent-bridge/packages/claude-code/bin/nia-claude.mjs mcp`。插件与纯 MCP 注册二选一，不要让两条连接竞争同一个 Agent。`npx skills add nia-teams/agent-bridge` 仅安装 Skill，不注册 MCP Server 或启用 Channel。
-
-### 第 2 步：配对主机并创建外部 Agent
-
-先运行 `nia-claude status`；输出的 Agent 与 Server 符合目标时复用凭证。首次接入或主动更换绑定时，使用 `nia-claude pair --name 'My Claude'`；下方 `--label` 写法与之等价。
+若这台主机曾经配对，先核对 `status` 输出中的 `Agent:`、`Server:` 和配置目录；仍是要使用的 Agent 时，无需再次配对。首次接入时，在主机终端执行：
 
 ```sh
-npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
+nia-claude pair --name 'My Claude Code'
 ```
 
-终端输出一次性浏览器链接；保持配对进程运行至浏览器确认完成：
+终端在本机生成 Ed25519 密钥对，并打印有效期为 10 分钟的配对链接：
 
 ```text
 Pairing code: A7F39C2B
 https://nia-teams.com/bridge/agent-pair/A7F39C2B
 ```
 
-在**任意设备的浏览器**打开该链接；不需要与运行 Claude Code 的电脑在同一台设备上。未登录时，先登录 Nia Teams，再回到 **连接外部 Agent** 页面：
+在**任意设备的浏览器**打开该链接，不需要与运行 Claude Code 的主机在同一台设备上。未登录时，先登录 Nia Teams，再回到 **连接外部 Agent** 页面：
 
-1. 填写 **Agent 名称**。若页面顶部显示切换栏，保持选中 **新建外部 Agent**；在 **归属** 中选择已加入的组织或 **个人助理**。
-2. 点击 **创建并连接**。创建者成为该 Agent 的 `owner`，主机终端完成签名验证并保存凭证，输出 `Paired: <Agent 名称> (@external-...)`。保持配对进程运行到退出码 `0`。
+1. 填写 **Agent 名称**（默认预填主机标签；若页面顶部显示切换栏，保持选中 **新建外部 Agent**）。若你加入了组织，在 **归属** 下拉框中选择目标组织或 **个人助理**。
+2. 点击 **创建并连接**。Nia Teams 创建该外部 Agent，你成为它的 `owner`；主机终端完成签名验证，把凭证保存到 `~/.config/nia-teams-claude-code/credentials.json`，输出 `Paired: <Agent 名称> (@external-...)`。保持配对进程运行到退出码 `0`。
 
-迁移已有 Agent 时，由它的 `owner` 或 `admin` 切换到 **重绑已有外部 Agent**，选中目标后点击 **确认重新绑定**。
+迁移已有 Agent 时，由该 Agent 的 `owner` 或 `admin` 切换到 **重绑已有外部 Agent**，选中目标后点击 **确认重新绑定**。
 
-![claude@alice-macbook 主机与 Acme 所属 claude-host 的外部 Agent 配对页](./docs/assets/agent-pairing.png)
+![连接外部 Agent：新建、重绑与组织选择](./docs/assets/agent-pairing.png)
 
-主机生成 Ed25519 密钥对并提供私钥持有证明；私钥不离开主机。凭证原子写入 `~/.config/nia-teams-claude-code/credentials.json`，POSIX 目录/文件权限分别为 `0700` / `0600`。配对与工作目录无关；仅在主动重绑或更换凭证时重新执行。
+凭证保存在主机上，POSIX 目录权限为 `0700`、文件权限为 `0600`。配对与项目目录无关，后续启动使用同一配置目录。
 
 ```sh
-npx @nia-teams/claude-code-plugin status
+nia-claude status
 ```
 
-`status` 执行 challenge/lease 认证，不建立常驻 WebSocket。只应由可信的本地操作者执行配对，不应因群聊消息的要求重新配对或修改凭证。
+`status` 展示已保存的配对身份与地址；连接状态在下一步通过常驻进程和群聊状态栏验证。
 
-### 第 3 步：启动宿主会话
+### 第 3 步：启动守护进程
 
-#### 方式 A：后台守护模式
+手动操作时可在交互终端以前台方式运行，日志保留在终端：
 
-在项目目录启动 `nia-claude start --cwd <dir>`。此模式通过 `@anthropic-ai/claude-agent-sdk` 的 `query()` 驱动已登录的本地 Claude CLI，不需要交互式 Channel 授权。
+```sh
+nia-claude start --cwd /path/to/workspace
+```
+
+后台运行或由本地 AI 启动时，使用脱离终端的进程：
 
 ```sh
 # 跨平台后台启动（Windows PowerShell/CMD/Git Bash、macOS、Linux）：
-nia-claude start --cwd "." --daemon
+nia-claude start --cwd "/path/to/workspace" --daemon
 
 # 仅 POSIX 的替代方式（不适用于 Windows）：
-nohup nia-claude start --cwd "$PWD" > /tmp/nia-claude.log 2>&1 &
+nohup nia-claude start --cwd /path/to/workspace > /tmp/nia-claude.log 2>&1 &
 sleep 2
 cat /tmp/nia-claude.log
 pgrep -af '[n]ia-claude.*start'
 ```
 
-- 每个群聊的 Claude Code 会话 ID 保存在凭证目录的私有 `threads.json`，后续轮次与进程重启读取并恢复该群聊会话。各群聊共享 `--cwd` 指定的项目目录。
-- SDK 设置 `strictMcpConfig: true`，启动时添加 `--strict-mcp-config`，仅使用本次传入的群聊 MCP 工具。用户、项目与本地设置仍参与权限规则和钩子处理。
-- `send_message` 与 `chat_history` 在当前群聊作用域内执行；所有回复均需显式调用 `send_message`，轮次结束文本保持私有。
-- `canUseTool` 收到工具权限请求时，在 TaskBar 弹出权限确认卡；`AskUserQuestion` 向发起人提问并等待群聊回复。已有允许规则不触发重复审批，`--full-auto` 选择 Claude Code 的 `bypassPermissions` 并跳过桥接确认。
-- 同一凭证只运行一个 `start` 或 `mcp` 连接。macOS 上任务执行期间通过 `caffeinate` 防止系统休眠；SIGINT/SIGTERM 中止 SDK 查询并清理卡片与连接。
+启动后建立到 `wss://nia-teams.com/ws/agent-bridge` 的认证连接。网络中断后使用指数退避重连；同一配对目录只由一个桥接进程持有。macOS 上任务执行期间通过 `caffeinate` 防止系统休眠，任务结束后释放。
 
-#### 方式 B：启用 Channel 的交互式 Claude Code 会话
+各群聊的模型上下文彼此独立，但共享 `--cwd` 指定的代码目录、仓库和本地工具。凭证与会话记录分别保存在 `credentials.json` 和 `threads.json` 中。
 
-在**任意工作目录**打开交互式会话：
+#### SDK 会话、工具请求与提问
 
-```sh
-claude --dangerously-load-development-channels plugin:nia-teams@nia-teams
-```
+每个群聊在私有 `threads.json` 中保存 Claude Code 的 `session_id`，后续查询通过 `resume` 恢复。`SessionHost` 为同一群聊串行执行轮次，运行中到达的消息排队；群聊会话切换时中止旧查询并清理旧输入。每个群聊默认最多排队 64 条消息，输入队列与待发回复队列分别管理。
 
-在本地确认 development-channel 警告与 MCP 授权。安装插件不会启用 Channel，每次启动会话仍需显式选择。该 flag 只绕过 Channel allowlist，不绕过组织策略；非交互式 `-p` 会忽略它。详见 [Channels reference](https://code.claude.com/docs/en/channels-reference)。
+SDK 的 system、assistant 与 result 事件仅用于保存会话和同步活动状态。终端输出留在本机，群聊回复通过 `send_message` 发布。
 
-若后续进入 `claude-plugins-official` 列表并获准启用 Channel，安装该来源的插件后可改用 `claude --channels plugin:nia-teams@claude-plugins-official`。这是未来收录后的条件用法，并不表示当前已经收录；当前本仓库 marketplace 的名称是 `nia-teams`。
+`canUseTool` 收到的工具请求显示为 TaskBar 权限确认卡。`AskUserQuestion` 则发到群聊等待任务发起人回答；单题回复文字，多题回复按问题文本为键的 JSON，例如 `{"目标分支":"main","运行测试":"是"}`。回答超时或轮次取消时，Claude Agent SDK 收到拒绝结果。
 
-#### CodeBuddy CLI 兼容性
+用户、项目、本地设置中的 Claude Code 允许规则与钩子继续生效。`strictMcpConfig: true` 仅加载桥接提供的群聊工具服务。已经允许的工具可能不触发 SDK 权限回调；`--full-auto` 选择 bypassPermissions 并跳过桥接确认。Claude Code 登录凭证保留在主机上，Nia 配对不替代 Claude Code 登录。
 
-对于支持相同插件命令及 Channel 协议的 CodeBuddy CLI 版本，使用对应的用户级安装与启动命令：
+### 第 4 步：把外部 Agent 拉进群聊并验证在线状态
 
-```sh
-codebuddy plugin marketplace add nia-teams/agent-bridge
-codebuddy plugin install nia-teams@nia-teams --scope user
-codebuddy --dangerously-load-development-channels plugin:nia-teams@nia-teams
-```
+点击配对成功页的 **前往群聊**，或打开 [Nia Teams](https://nia-teams.com) 进入左侧 **消息** 页：
 
-不支持插件系统的宿主，使用其 CLI 注册用户级 MCP Server（支持时可执行 `codebuddy mcp add --scope user nia-teams -- npx -y @nia-teams/claude-code-plugin mcp`），再运行 `codebuddy --dangerously-load-development-channels server:nia-teams`。纯 MCP 方式的 Claude Code 同样使用 `claude --dangerously-load-development-channels server:nia-teams` 启动。两种方式都无需项目级 `.mcp.json`。
+- **发起新对话**：在消息列表顶部的 Agent 快捷栏点击刚创建的外部 Agent 头像发起对话（Agent 较多时可点快捷栏右侧下箭头展开），或点击快捷栏最右侧的 **`+`**（新建聊天）创建多人群聊。
+- **拉进已有群聊**：打开已有群聊，点击右上角成员头像旁的 **`+`**（添加聊天成员），在 **邀请已有成员** 弹窗中勾选该外部 Agent 并点击 **完成**。同一组织成员可将组织归属的 Agent 拉入群；「个人助理」仅创建者可拉入群，加入后群内其他成员也可 `@` 它。
 
-兼容性以协议为边界，请核对所用版本的 flag 与授权行为。本仓通过 SDK 客户端测试 MCP 契约，未声称验证某一 Claude Code 或 CodeBuddy 可执行版本。
+进入群聊后，查看底部输入框上方的状态栏：当该外部 Agent 的状态从红色的 **`未连接`** 变为 **`空闲待命`**，说明 Claude Code 桥接进程已经连通就绪。
 
-### 第 4 步：邀请进入群聊与调用
+### 第 5 步：在群聊中 `@` 它协作与日常管理
 
-打开 Nia Teams「消息」，通过外部 Agent 快捷入口发起聊天，或在已有群聊成员区域点击 `+` 邀请。组织成员可邀请组织归属的 Agent；个人助理由创建者首次邀请。进入群聊后，成员可 `@` 它发送任务。保持宿主会话运行，确认活动状态显示已连接。
+在输入框输入 `@` 选中该外部 Agent 并发送任务。执行时状态栏显示 `Thinking…` 或正在运行的工具，回复发回群聊。后续日常管理按权限分为三类：
 
-传入消息头包含群聊标题、URL、成员 ID、发起人、消息、附件与转写。后台模式通过 `send_message` 发布回复；交互式 Channel 模式额外使用以下路由参数。终端输出不会发布：Claude 必须调用 `send_message` 并传入通知里的 `group_chat_id`。中途更新使用 `keep_working: true`；最终回复省略该字段，让状态回到空闲。提及成员使用 `<mention userId="24-hex-id" />`，而非纯文本 `@Name`。
+- **临时离线（主机侧操作）**：以前台方式运行时，在主机终端按 `Ctrl+C` 停止 `nia-claude start`；后台运行时，对启动时记录的 PID 发送 SIGTERM。群内状态会变为 `未连接`，重新运行 `nia-claude start --cwd /path/to/workspace` 即可恢复连接。
+- **更换主机或解绑主机（需该 Agent 的 `owner` 或 `admin`）**：迁移到新主机时，在新主机执行 `nia-claude pair`，在浏览器配对页切换到 **重绑已有外部 Agent**，选中目标后点击 **确认重新绑定**。若仅需解绑，在它的对话页或共同所在的群聊右上角打开应用菜单（网格图标 **Apps**）→ **Agent 设置**，点击 **解绑主机**。重绑或解绑会递增 `keyGeneration` 使旧主机凭证失效，并以关闭码 `4401` 断开旧连接。
+- **停用归档（仅唯一 `owner` 可操作）**：当该外部 Agent 没有其他联系人且你是唯一 `owner` 时，在 **Agent 设置** 底部点击 **停用「&lt;Agent 名称&gt;」**，再点 **确认停用**，即可归档移除并断开在线连接。
 
-群聊工具：
+### 常见问题排查（连不上怎么办）
 
-- `send_message({ content })` 向当前群聊发送回复或进度；终端文本留在本机。
-- `chat_history({ limit?, offset? })` 分页读取群聊历史。
-- Channel 模式的两个工具均需传入通知中的 `group_chat_id`；发送进度时使用 `keep_working: true`。
+- **网页提示「配对请求已过期」**：配对链接有效期为 10 分钟，回到主机终端重新执行 `nia-claude pair`，再打开新链接。
+- **`nia-claude status` 报错或绑定不是目标 Agent**：核对当前系统用户、配置目录和服务地址。若尚未完成配对，或旧主机凭证因重绑、解绑而失效，重新执行 `nia-claude pair` 并启动桥接进程。`status` 只显示保存的身份，不代表主机已在线。
+- **群里一直显示红色 `未连接`**：确认 `nia-claude start` 进程仍在运行，检查 `/tmp/nia-claude.log` 中的启动或连接错误，并用 `nia-claude status` 核对群内 Agent 与保存的身份是否一致。若日志出现 `4409`，说明另一个连接接管了同一身份，应检查是否重复启动了进程。
+- **Claude Code 未登录或启动失败**：先在同一系统用户下运行 Claude Code CLI，完成登录，确认 Node.js 版本和可执行文件路径。模型产品的登录与 Nia Teams 配对是两件事，不能互相替代。
+- **任务已执行但没有回复**：检查守护进程日志中的运行或消息发布错误，确认任务未被取消，也未因群聊会话切换而中断。
 
-### 第 5 步：TaskBar 工具确认
-
-![Allow Bash 确认卡、npm test 参数预览、claude-host 等待状态与输入框](./docs/assets/taskbar-approval.png)
-
-在后台 SDK 或交互式 Channel 模式中，Claude Code 请求工具权限时，插件在 TaskBar 弹出 `Allow <tool>?` 卡片。先阅读真实参数预览，再点击「允许执行」。主机验签通过后只允许该次请求；忽略卡片、无效或缺失 Token、超时与取消均拒绝。Channel 模式的终端提示仍同时有效，由宿主采用最先到达的有效响应。项目 trust 与 MCP consent 只能在本地完成。
-
-## 角色与权限边界
-
-- 外部 Agent 的 `owner` / `admin` 可重绑或解绑主机；只有唯一剩余的 `owner` 可按 Nia Teams 移除规则归档。重绑/解绑递增 `keyGeneration` 并使旧主机失效，归档也会撤销连接。
-- 群聊成员可以调用 Agent 或忽略当前确认卡。批准 TaskBar 卡片的点击者必须同时是该外部 Agent 的有效成员（`owner` / `admin` / `member`）；Nia Teams 校验后才签发 Token。同群但不是 Agent 成员的人不能批准。
-- 主机独立验证 RS256 签名、issuer、audience、有效期、service 身份、人类确认、 card ID、工具名与 canonical argument digest。仅凭 `clickedBy.teamRole` 不构成批准证明。
-- Agent 的 workload 身份字段 `sub`、`org:*`、`role:*` 不等于人类成员角色。本桥通过 Ed25519 challenge/lease 认证，不会把这些字段转换成本地 OS 权限。确认 Token 表示特定的人类已批准 service action。
-- 本地执行仍受 Claude Code 权限系统与 sandbox 约束。配对不意味着任意 shell 授权，也不会改写本地工具权限或宿主配置。
-
-## CLI 与运行语义
+## 三、CLI 参数、环境变量与包导出
 
 ```text
-nia-claude pair [--name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--timeout-ms <ms>]
-nia-claude start [--cwd <dir>] [--config-dir <dir>] [--model <model>] [--claude-bin <path>] [--full-auto]
+nia-claude connect --invite-code <code> [--user-name <name>] [--agent-name <name>]
+                   [--no-browser] [--no-start] [--cwd <dir>] [--daemon] [--log-file <path>]
+nia-claude pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-claude status [--config-dir <dir>]
-nia-claude mcp [--config-dir <dir>]
+nia-claude start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
+                   [--full-auto] [--claude-bin <path>] [--daemon] [--log-file <path>]
+nia-claude --help
 ```
 
-- 服务 origin 优先级：`--server-url`、`NIA_TEAMS_URL`、`https://nia-teams.com`；后续命令使用凭证保存的 origin。
-- 凭证目录优先级：`--config-dir`、`NIA_CLAUDE_CONFIG_DIR`、`~/.config/nia-teams-claude-code`。
-- `start` 的 `--cwd` 默认为当前目录；`--model` 指定 Claude Code 模型；`--claude-bin`、`CLAUDE_BIN`、本机常见安装目录依次选择 CLI；`--full-auto` 开启免确认执行。
-- 默认主机标签 `claude-code@<hostname>`；配对超时 600000 ms，每 2 秒轮询。
-- 有界内存 FIFO 队列在短暂断线后重试回复，保留原 Nia session 与发布 UUID；进程崩溃后不持久保存。
-- 后台 `start` 为各群聊持久化独立 SDK 会话；交互式 `mcp` Channel 中，多个 GroupChat 共享一个宿主/模型上下文。权限请求无群聊 ID，优先路由到最近触发且处于 executing 的群聊，否则路由到最近触发的已跟踪群聊。尚无群聊消息时，终端请求保持本地处理。需要隔离时使用独立宿主身份与会话。
-- Channel 模式的 executing/waiting 每 30 秒续租。权限卡在本地 5 分钟超时。宿主协议不发送远程提示已结束通知，因此终端先批准后远端卡片可能保留至超时；宿主忽略已关闭请求的后续 verdict。
-- 后台模式取消会中止 SDK 查询、清理该群聊输入队列和待确认卡。Channel 模式的群聊取消会拒绝待确认权限、撤销卡片、取消排队回复并设为空闲；通知要求 Claude 停止对应任务，但 Channel 协议无法强制中断正在运行的本地工具。
-- Channel 模式中，stdin end/close、SIGINT/SIGTERM/SIGHUP 与 stdin watchdog 均触发尽力清理和有时限退出。MCP stdout 仅含 JSON-RPC，诊断写 stderr。`4409` 表示新主机接管，旧连接停止重连。
+- `connect`：使用邀请码接入；首次注册需提供 `--user-name` 与 `--agent-name`。接入后启动守护进程，已在运行时使用 `--no-start`。
+- `--daemon`：脱离终端运行并打印 PID 与日志位置；`--log-file` 指定日志，默认 `<config-dir>/daemon.log`。可在 Windows PowerShell、CMD、Git Bash、macOS 和 Linux 使用。
+- `--server-url`：配对服务 origin，优先级为参数、`NIA_TEAMS_URL`、`https://nia-teams.com`；后续命令读取保存的地址。
+- `--config-dir`：参数优先于 `NIA_CLAUDE_CONFIG_DIR`，默认 `~/.config/nia-teams-claude-code`；pair、status、start 应指向同一目录。
+- `--name`：配对主机标签，显示在浏览器和握手中；未传入时按宿主前缀与主机名生成。浏览器可另行填写 Agent 显示名。
+- `--cwd`：项目工作目录，默认当前目录，启动时转为绝对路径；它不改变配对凭证位置。
+- `--model`：传给 Claude Agent SDK 的模型名称；可用模型取决于 Claude Code 账号和配置。
+- `--help` / `-h`：显示命令概览；无命令时也显示帮助。
+- `--claude-bin / CLAUDE_BIN`：指定 Claude Code 可执行文件或 `.js` / `.mjs` / `.cjs` 入口。
+- `--full-auto`：关闭桥接工具确认。
 
-## 排障与开发验证
+### 包导出与嵌入入口
 
-后台模式先检查 `/tmp/nia-claude.log`、`pgrep -af '[n]ia-claude.*start'`、本地 Claude 登录与 `--cwd` 权限。切换模式前停止旧连接；群聊会话状态保存在配对目录的 `threads.json`。
+| 入口 | 用途 |
+| --- | --- |
+| `nia-claude` | 主机配对、身份检查与守护进程 |
+| `createClaudeRunner` | 创建供 SessionHost 使用的 SDK 运行器 |
+| `resolveClaudeBinary` | 定位 Claude Code CLI |
+| `SessionHost` | 群聊队列、会话恢复、取消与工具确认 |
+| `dist/**/*.d.ts` | 导出函数、配置与运行时接口的类型声明 |
 
-`npx @nia-teams/claude-code-plugin status` 失败通常与缺失/轮换凭证或错误 origin 有关，在本地重新配对并重启宿主。持续未连接时检查 `/mcp`、宿主 stderr/debug 日志、凭证目录与重复服务注册。缺少群聊回复时确认 Claude 是否只写了终端文字而未调用发送工具。Channel 通知被丢弃可能是未启用或组织策略限制；写入 transport 成功不代表宿主已消费消息。
+根模块通过具名导出提供接口，公开子路径为 `.` 与 `./package.json`。方法签名查询类型声明，运行时协议与 Claude Code 数据结构见 [docs/SPECIFICATION.md](./docs/SPECIFICATION.md)。
+
+嵌入时把 `createClaudeRunner(options)` 交给 core 的 `runSessionDaemon`，或由接入方构造 `SessionHost` 管理生命周期。SDK 查询与群聊工具共用当前轮次的作用域，不由模型选择目标群聊。
+
+## 四、权限确认、群聊工具与安全边界
+
+![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
+
+### 1. TaskBar 签名确认流程
+
+1. Claude Code 请求工具权限时，桥接在 TaskBar 弹出权限确认卡，并保存当前轮次与请求参数。
+2. Nia Teams 校验点击者是外部 Agent 的有效 `owner`、`admin` 或 `member`，签发 `_meta["nia/confirmationToken"]`，随 `card.action` 送回主机。
+3. core 通过 `@nia-teams/mcp-sdk/auth`，从 `${issuer}/oauth2/jwks` 获取公钥，验证 RS256 签名、issuer、`aud: nia-teams-workload`、有效期、service 身份与 `human_confirmed: true`。
+4. 验证 `context_server: agent-bridge`、`context_tool: claude_code.permission`、canonical JSON 参数的 SHA-256 摘要及 `confirmation_card_id === cardId`。验证对象来自本机保存的请求，不从聊天正文重建。
+5. 通过后只批准该次请求；缺失/无效 Token、忽略卡片、超时或取消均拒绝。待确认卡默认 5 分钟到期。
+
+### 2. 群聊工具、消息与原生提及
+
+- `send_message({ content })` 向当前群聊发布 Markdown 或 Rich HTML，常用于进度与提问；所有回复均需显式发送，轮次结束文本保持私有。
+- `chat_history({ limit?, offset? })` 分页读取历史；`limit` 默认 50、范围 1..100，`offset` 默认 0 且为非负整数。运行时注入当前 Nia session，模型不传目标群聊 ID。
+- 群聊工具限定在当前活跃轮次；中断或群聊会话切换后，旧工具请求不能继续向新的群聊会话发布。
+
+传入提示列出 `Members: Alice (<userId>), ...`，消息段列出发送者 ID、时间、消息 ID、回复关系与附件转写。通用消息也可表现为 `[chat:<chatId>] Alice (<userId>): ...`，结构化频道可携带 `senderId`；原始桥接帧字段为 `messages[].authorId`。回复中使用 `<mention userId="24-hex-id" />` 触发原生通知，ID 从发送者或成员列表取得。
+
+### 3. 成员角色与本地执行边界
+
+- 群聊成员可 `@` 调用 Agent；重绑或解绑要求该 Agent 的 `owner` / `admin`，归档按唯一 `owner` 规则处理。审批卡的批准还要求有效 Agent 成员身份。
+- 人类成员角色不等于 workload 的 `sub`、`org:*`、`role:*` 字段；消息声称“已批准”不产生签名确认，也不修改本机权限。
+- Ed25519 私钥只保存在配置目录。加载凭证校验文件权限、符号链接与公私钥一致性；不要把凭证文件放进项目仓库或日志。
+- 发布队列按 FIFO 保留幂等键，在进程内处理临时断线；上限为 256 项 / 16 MiB，单个协议帧不超过 512 KiB。进程退出不会保存未发队列。
+- 连接使用 20 秒心跳、60 秒入站空闲超时与带抖动退避重连；关闭码 `4409` 结束旧连接。业务会话隔离不提供文件系统或 OS 隔离。
+
+## 五、开发验证与商标许可证
 
 ```sh
-npm ci
-npm run typecheck
+npm install
 npm run build
+npm run typecheck
 npm test
 npm pack --dry-run
 ```
 
-测试使用本地 HTTP/WebSocket 服务、Ed25519 持有证明、真实 RS256/JWKS 签名、MCP 内存客户端与 stdio 子进程，无需真实服务凭证。嵌入入口参见 [`examples/`](./examples/) 与 `dist/*.d.ts`。
+维护接口或 Claude Code 协议时同步更新中英文 README、随包 Skill、类型声明和协议规范。
 
-## 商标与许可证
-
-Claude 与 Claude Code 是 Anthropic, PBC 的商标。`@nia-teams/claude-code-plugin` 由 Nia Teams 维护，与 Anthropic 无隶属关系，也未获其认可。
+Claude Code 是 Anthropic 的产品名称。本包由 Nia Teams 维护，与 Anthropic 无隶属关系。
 
 [MIT](./LICENSE) © Nia Teams

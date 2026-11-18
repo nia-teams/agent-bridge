@@ -5,7 +5,7 @@ The shared transport contract is [core Agent Bridge v2](../packages/core/docs/SP
 | Adapter | Runtime contract |
 | --- | --- |
 | Codex | [JSON-RPC app-server, persistent threads, approvals](../packages/codex/docs/SPECIFICATION.md) |
-| Claude Code | [Channel protocol](../packages/claude-code/docs/SPECIFICATION.md) and [SDK daemon](../packages/claude-code/docs/DAEMON.md) |
+| Claude Code | [Claude Agent SDK, per-chat sessions, approvals](../packages/claude-code/docs/SPECIFICATION.md) |
 | WorkBuddy | [SDK and desktop auth](../packages/workbuddy/docs/SPECIFICATION.md) |
 | Doubao | [Desktop CDP, HTTP runtime and official CLI](../packages/doubao/docs/SPECIFICATION.md) |
 | DSH | [Harness host protocol](../packages/dsh/docs/SPECIFICATION.md) |

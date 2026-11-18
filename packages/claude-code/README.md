@@ -2,74 +2,62 @@
 
 English | [简体中文](./README_CN.md)
 
-Connect local or remote **Claude Code**—and compatible `claude/channel` hosts such as CodeBuddy CLI—into [Nia Teams](https://nia-teams.com) as an Agent in Nia Teams with **two-way communication**.
+Connect **Claude Code** into [Nia Teams](https://nia-teams.com) as an Agent in Nia Teams with **two-way communication**.
 
 ```sh
 npm install -g @nia-teams/claude-code-plugin
-nia-claude pair --name "My Claude"
+nia-claude pair --name 'My Claude Code'
 nia-claude start --cwd "." --daemon
 ```
 
-Interactive Channel installation:
-
-```sh
-claude plugin marketplace add nia-teams/agent-bridge
-claude plugin install nia-teams@nia-teams --scope user
-npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
-```
-
-AI coding agents: load [`./skills/nia-teams-claude-code/SKILL.md`](./skills/nia-teams-claude-code/SKILL.md), or `node_modules/@nia-teams/claude-code-plugin/skills/nia-teams-claude-code/SKILL.md` after npm installation. The plugin skill is `/nia-teams:nia-teams-claude-code` in Claude Code.
-
-[中文](./README_CN.md) · [Wire specification](./docs/SPECIFICATION.md) · [Maintainer guidance](./AGENTS.md)
+AI coding agents: load [skills/nia-teams-claude-code/SKILL.md](./skills/nia-teams-claude-code/SKILL.md); installed path: `node_modules/@nia-teams/claude-code-plugin/skills/nia-teams-claude-code/SKILL.md`.
 
 For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
 
-## Product overview
+## 1. Product Overview & Collaboration Model
 
-[Nia Teams](https://nia-teams.com) provides shared GroupChats where people and Agents collaborate. The chat timeline contains published replies; the live activity strip shows executing, waiting, or idle state. TaskBar cards beside the composer collect explicit human approval for a particular tool call. Pairing associates one host key with an external Agent identity; the model and tools continue running on your own computer or server.
+The package runs tasks through the Claude Agent SDK using local Claude Code CLI authentication. Each GroupChat retains its session, and teammates approve tool requests in TaskBar.
 
-![Production Ops GroupChat with claude-host, Bash permission card, and live waiting state](./docs/assets/group-chat-overview.png)
+- **Create and bind in one flow, without precreating an Agent or distributing static keys**: Start pairing on the Claude Code host, sign in to Nia Teams from a browser on any device, create the external Agent, and bind the host public key. The private key stays on the host.
+- **Live presence and per-GroupChat conversation history**: The composer activity strip shows disconnected, idle, executing, or waiting state. Each chat retains its own Claude Code session for later turns; the host workspace is shared.
+- **TaskBar approvals and mid-turn tools**: Permission requests display tool names and arguments for Agent-member approval; model tools publish progress and read GroupChat history.
 
-### Collaboration boundaries
+![Nia Teams GroupChat and Agent activity](./docs/assets/group-chat-overview.png)
 
-| Component | Responsibility |
-| --- | --- |
-| Claude Code Host | Model session, working directory, local tools, sandbox, permission prompts, terminal approval |
-| `@nia-teams/claude-code-plugin` | Authenticated bridge, Channel notifications, reply/history tools, activity leases, verified permission relay |
-| Nia Teams | GroupChat membership, external Agent binding, TaskBar UI, approval authorization and signed confirmation |
+| Concern | Local host | This package | Nia Teams |
+| --- | --- | --- | --- |
+| Agent runtime | Models, tools, workspace, Claude Code sign-in | Chat-to-runtime sessions, queries, cancellation | External Agent identity and scope |
+| Connection and auth | Local Node process and Claude Code CLI | Ed25519 credentials, WebSocket, reconnection | Browser pairing, challenge/lease, delivery |
+| Conversation | Inference turns and local tasks | Prompt formatting, session resume, publication | Timeline, members, activity |
+| Approval and safety | Claude Code tool permissions and execution scope | Display tool permission requests as TaskBar cards, verify RS256, match pending actions | TaskBar, Agent membership, signed approvals |
 
-`nia-claude start` uses `@anthropic-ai/claude-agent-sdk` to invoke the local Claude CLI, persist a session per GroupChat, and display tool permission requests as TaskBar confirmation cards. In interactive Channel mode, MCP supplies stdio transport and tool discovery. `claude/channel` supplies inbound host events; `claude/channel/permission` supplies permission relay. Agent Bridge supplies authenticated Nia Teams messaging and cards. Channel mode delegates model execution to the interactive host; daemon mode invokes the local Claude CLI through the SDK. Neither opens a public HTTP listener; execution follows the selected permission mode.
+## 2. Five-Step Quick Start
 
-## Quickstart
+Prerequisites: Node.js 20+, a signed-in Claude Code CLI, and a Nia Teams account. No external Agent needs to be created in advance.
 
-### Step 1: Install the CLI or global plugin
+### Step 1: Install the bridge and prepare the host
 
-Requirements: Node.js 20+, a Nia Teams account, and an authenticated local Claude CLI. Install daemon mode with:
+Install and sign in to Claude Code CLI under the same OS user, then install the bridge:
 
 ```sh
 npm install -g @nia-teams/claude-code-plugin
 ```
 
-Interactive Channel mode uses a Claude Code version supporting Channels and permission relay. Channels are a research preview; account, organization policy, and host version restrictions apply. Use a current host release; Claude Code documents channel-gated relay in v2.1.234 and later.
+Discovery searches PATH and common installation directories for `claude`. Select an executable with `--claude-bin` or `CLAUDE_BIN`; the SDK uses `pathToClaudeCodeExecutable`. Local Claude Code login and Nia Teams pairing are separate.
+
+### Step 2: Pair the host and create an Agent in the browser
 
 ```sh
-claude plugin marketplace add nia-teams/agent-bridge
-claude plugin install nia-teams@nia-teams --scope user
+nia-claude status
 ```
 
-Install once for all working directories on this computer. The plugin bundles its MCP startup configuration (`.mcp.json`) and explicitly registers `/nia-teams:nia-teams-claude-code`; **no Nia Teams configuration file is needed in your application repositories**. The repository's marketplace manifest registers `nia-teams@nia-teams` directly, with no separate marketplace repository.
-
-For a bare MCP host, the equivalent user-scoped CLI registration is `claude mcp add --scope user nia-teams -- npx -y @nia-teams/claude-code-plugin mcp` (replace `claude` with a compatible host such as `codebuddy`); local source development uses `claude mcp add --scope user nia-teams -- node /absolute/path/to/agent-bridge/packages/claude-code/bin/nia-claude.mjs mcp` after `npm ci && npm run build`. Choose either plugin installation or bare MCP registration, never both for the same Agent connection. Skills-only installation with `npx skills add nia-teams/agent-bridge` does not register the MCP server or enable a Channel.
-
-### Step 2: Pair the Host & Create the External Agent
-
-Run `nia-claude status` first and reuse credentials for the intended Agent and Server. For first setup or an intentional rebind, use `nia-claude pair --name 'My Claude'`; the `--label` form below is equivalent.
+Check the saved `Agent:`, `Server:`, and config directory first. Reuse an existing intended binding; pair for first setup or an intentional Agent change:
 
 ```sh
-npx @nia-teams/claude-code-plugin pair --label 'claude@macbook'
+nia-claude pair --name 'My Claude Code'
 ```
 
-The terminal prints a one-time browser link; keep the pairing process running until browser approval completes:
+The terminal generates an Ed25519 keypair locally and prints a pairing link valid for 10 minutes:
 
 ```text
 Pairing code: A7F39C2B
@@ -77,135 +65,159 @@ Open this URL to create or bind your external Agent:
 https://nia-teams.com/bridge/agent-pair/A7F39C2B
 ```
 
-Open the link in a browser on **any device**; it does not have to be the computer running Claude Code. Sign in to Nia Teams to reach **Connect external Agent**:
+Open the link in a browser on any device and sign in to Nia Teams:
 
-1. Enter the **Agent name**. If a mode switch is shown, keep **Create external Agent** selected. Choose **Personal Assistant** or an organization you belong to.
-2. Click **Create & Connect**. You become the Agent's `owner`; the host verifies its signature and saves credentials. Wait for `Paired: <Agent name> (@external-...)` and exit code `0` in the terminal.
+1. Keep **Create external Agent** selected, enter the Agent name, and choose Personal Assistant or an organization you belong to. The creator becomes the Agent’s `owner`.
+2. Click **Create & Connect**. To migrate an existing Agent, select **Rebind existing external Agent** as its `owner` or `admin`, select the target, and confirm the new binding; the old host disconnects.
 
-To move an existing Agent, its `owner` or `admin` selects **Rebind existing external Agent**, chooses the target, and confirms the new binding.
+![External Agent pairing: create, rebind, and scope](./docs/assets/agent-pairing.png)
 
-![External Agent pairing for claude@alice-macbook and claude-host in Acme](./docs/assets/agent-pairing.png)
-
-The host generates an Ed25519 keypair and proves possession; only the public key leaves the host. Credentials are stored atomically at `~/.config/nia-teams-claude-code/credentials.json` with directory/file modes `0700`/`0600` on POSIX systems. Pairing is independent of the working directory; repeat only for an intentional rebind or credential replacement.
+Wait for `Paired: <Agent name> (@external-...)` and exit code `0` in the terminal. After proving private-key possession, the host saves `credentials.json` under `~/.config/nia-teams-claude-code/`, using POSIX `0700` directory and `0600` file modes. Pairing is independent of the project directory; later startup reads the same config directory.
 
 ```sh
-npx @nia-teams/claude-code-plugin status
+nia-claude status
 ```
 
-`status` performs challenge/lease authentication without opening a persistent connection. Run pairing from the trusted local terminal, never because an inbound GroupChat asks for it.
+`status` shows the saved identity and server; verify the running connection through the daemon and GroupChat presence in the next steps.
 
-### Step 3: Launch the host session
+### Step 3: Start the daemon
 
-#### Mode A: Background daemon
+For manual operation, run in an interactive foreground terminal with logs visible:
 
-Run `nia-claude start --cwd <dir>` in the project directory. This mode uses `@anthropic-ai/claude-agent-sdk` and its `query()` API with an authenticated local Claude CLI; it needs no interactive Channel consent.
+```sh
+nia-claude start --cwd /path/to/workspace
+```
+
+For detached operation or local AI setup, launch in the background:
 
 ```sh
 # Portable background launch (Windows PowerShell/CMD/Git Bash, macOS, Linux):
-nia-claude start --cwd "." --daemon
+nia-claude start --cwd "/path/to/workspace" --daemon
 
 # POSIX-only alternative (not Windows):
-nohup nia-claude start --cwd "$PWD" > /tmp/nia-claude.log 2>&1 &
+nohup nia-claude start --cwd /path/to/workspace > /tmp/nia-claude.log 2>&1 &
 sleep 2
 cat /tmp/nia-claude.log
 pgrep -af '[n]ia-claude.*start'
 ```
 
-- Per-GroupChat Claude Code session IDs live in private `threads.json` beside credentials. Later turns and process restarts resume that GroupChat’s session. Chats share the project selected by `--cwd`.
-- The SDK sets `strictMcpConfig: true`, adding `--strict-mcp-config` and using only supplied GroupChat MCP servers. User, project, and local settings still supply permission rules and hooks.
-- `send_message` and `chat_history` run in the current GroupChat scope. All public replies require explicit `send_message`; turn completion only reports idle.
-- Tool requests forwarded to `canUseTool` create TaskBar cards; `AskUserQuestion` posts questions and waits for the invoker’s GroupChat response. Existing allow rules remain effective; `--full-auto` selects Claude Code `bypassPermissions` and skips bridge confirmation.
-- Use one `start` or `mcp` connection per credentials. On macOS, `caffeinate` prevents system sleep while a task runs; SIGINT/SIGTERM abort the SDK query and clean up cards and transport.
+Startup opens an authenticated connection to `wss://nia-teams.com/ws/agent-bridge`. Network interruptions reconnect with exponential backoff. Run one bridge per paired config directory. On macOS, `caffeinate` prevents system sleep while a task runs and is released when the task finishes.
 
-#### Mode B: Interactive Claude Code with the Channel
+GroupChats have separate model contexts but share the files, repository, and local tools under `--cwd`. Credentials and session records are stored separately in `credentials.json` and `threads.json`.
 
-From **any working directory**, start an interactive session:
+#### SDK sessions, tool requests, and questions
 
-```sh
-claude --dangerously-load-development-channels plugin:nia-teams@nia-teams
-```
+Private `threads.json` stores each GroupChat’s Claude Code `session_id`; later queries pass it as `resume`. `SessionHost` serializes turns within a chat and queues incoming messages. Nia session rotation aborts the old query and clears old inputs. Each chat admits up to 64 queued messages by default; input admission and outgoing publication queues are separate.
 
-Accept the development-channel warning and any MCP consent locally. Installing a plugin does not automatically enable its Channel: opt in at each session launch. The development flag bypasses the channel allowlist, not organization policy, and is ignored in non-interactive `-p` sessions. Refer to the [upstream Channels reference](https://code.claude.com/docs/en/channels-reference).
+SDK system, assistant, and result events drive session persistence and activity only. Terminal output stays on the host; GroupChat replies are published through `send_message`.
 
-If this plugin is later listed and allowlisted in `claude-plugins-official`, install that listing and use `claude --channels plugin:nia-teams@claude-plugins-official` instead. That command is conditional on future inclusion, not a claim that the listing already exists. The current self-hosted marketplace remains `nia-teams`.
+Tool requests delivered to `canUseTool` become TaskBar cards. `AskUserQuestion` instead posts to GroupChat and waits for the task’s invoking human. Reply with text for one question; for multiple questions, use JSON keyed by question text, such as `{"Target branch":"main","Run tests":"yes"}`. Timeout or cancellation returns a deny result to the Claude Agent SDK.
 
-#### CodeBuddy CLI compatibility
+Claude Code allow rules and hooks from user, project, and local settings remain effective. `strictMcpConfig: true` loads only the bridge-supplied GroupChat tool server. Already-allowed tools may not reach the SDK permission callback; `--full-auto` selects bypassPermissions and skips bridge confirmation. Claude Code authentication belongs to the model host; Nia pairing does not replace Claude Code login.
 
-For a CodeBuddy CLI release supporting the same plugin commands and Channel contract, use the equivalent user-scoped plugin installation and launch:
+### Step 4: Invite the external Agent and verify presence
 
-```sh
-codebuddy plugin marketplace add nia-teams/agent-bridge
-codebuddy plugin install nia-teams@nia-teams --scope user
-codebuddy --dangerously-load-development-channels plugin:nia-teams@nia-teams
-```
+Click **Go to GroupChat** on the pairing confirmation page, or open Nia Teams **Messages** in the left navigation:
 
-For a host without plugin support, register the MCP server at user scope with its CLI (`codebuddy mcp add --scope user nia-teams -- npx -y @nia-teams/claude-code-plugin mcp` when supported), then launch `codebuddy --dangerously-load-development-channels server:nia-teams`. A bare Claude Code registration similarly uses `claude --dangerously-load-development-channels server:nia-teams`. Neither path requires a project `.mcp.json`.
+- **Start a new conversation**: Click the external Agent avatar in the quick strip above the chat list; expand the strip when it overflows. The `+` at its right creates a multi-person GroupChat.
+- **Invite into an existing chat**: Open the GroupChat, click `+` beside member avatars in the upper-right header, select the Agent in **Invite existing members**, and click **Done**.
+- **Invitation roles**: Organization members can invite organization-affiliated Agents. The creator initially invites a Personal Assistant; other members of that GroupChat may then invoke it.
 
-Compatibility is protocol-based; verify your host version's supported flags and consent behavior. This repository tests the MCP contract with SDK clients, not a particular CodeBuddy or Claude Code executable.
+Watch the activity strip above the composer: red **Disconnected** changes to **Idle / Ready** when the host connects. Match the chat Agent to the identity shown by `status`, then send a short task to verify a reply.
 
-### Step 4: GroupChat invitation and invocation
+### Step 5: Mention the Agent and manage its lifecycle
 
-Open Nia Teams **Messages**. Start a chat using the external Agent shortcut, or open an existing GroupChat and use the member **+** control to invite it. Organization members can invite an organization-affiliated Agent; a personal assistant is initially invited by its creator. Once invited, GroupChat members can `@` it to send tasks. Keep the host session running and confirm its live status is connected.
+Type `@` in the composer and select the external Agent. Its activity becomes executing while the task runs, and replies appear in GroupChat. Incoming prompts include title, URL, members, sender, messages, and attachment transcripts. Notify a person with their ID: `<mention userId="24-hex-id" />`, rather than plain `@Name`.
 
-Incoming headers contain the title, URL, member IDs, sender, messages, attachments, and transcripts. Daemon replies require explicit `send_message`; Channel mode adds the routing parameters below. Terminal output remains private: Claude must call `send_message` with the received `group_chat_id` for every reply. Interim updates use `keep_working: true`; final replies omit it to mark idle. Mentions use `<mention userId="24-hex-id" />`, not plain `@Name`.
+- **Temporary offline**: Press `Ctrl+C` in the foreground terminal or send SIGTERM to the recorded background PID. Presence becomes **Disconnected**. Restart loads existing credentials and session mappings.
+- **Move or unpair a host**: An Agent `owner` / `admin` pairs the new host and selects **Rebind existing external Agent**. To unpair only, use **Apps → Agent Settings → Unpair host** in a shared chat’s upper-right header. Rebind/unpair increments `keyGeneration` to invalidate old host credentials and disconnects the old host with `4401`. A competing connection taking over the same identity closes the old connection with `4409`, stopping reconnects.
+- **Deactivate and archive**: When no other contacts remain and you are the sole `owner`, use **Agent Settings → Deactivate “Agent name” → Confirm**. Archiving revokes the Agent’s online connections.
 
-GroupChat tools:
+### Troubleshooting
 
-- `send_message({ content })` posts replies or progress to the current GroupChat; terminal text stays on the host.
-- `chat_history({ limit?, offset? })` paginates GroupChat history.
-- In Channel mode, both tools also require the notification’s `group_chat_id`; progress messages use `keep_working: true`.
+- **Pairing request expired**: Links last 10 minutes. Run `nia-claude pair` again on the host and open the new URL.
+- **status fails**: Check OS user, config directory, file permissions, and completed pairing. A locally operated re-pair may be needed after rebind/unpair; diagnose network and origin failures before replacing credentials.
+- **Chat stays red Disconnected**: Inspect the daemon, `/tmp/nia-claude.log`, saved Server, and chat Agent identity. Check for another process using the credentials. Close code `4409` means another connection took over.
+- **Claude Code login or startup fails**: Run the Claude Code CLI under the same OS user, sign in, and verify Node version and binary selection. Claude Code sign-in and Nia pairing are separate.
+- **Execution without a reply**: Check the daemon log for runtime or publication errors, and verify the turn was not canceled or interrupted by session rotation.
 
-### Step 5: TaskBar tool approval
-
-![Allow Bash TaskBar card with npm test argument preview, claude-host waiting state, and composer](./docs/assets/taskbar-approval.png)
-
-In SDK daemon or interactive Channel mode, when the host forwards a tool permission request, the plugin creates an `Allow <tool>?` card. Read the actual argument preview before selecting **允许执行**. A verified RS256 confirmation allows that single request; dismissal, missing or invalid tokens, timeout, and cancellation deny it. In Channel mode, the terminal prompt remains available: the host applies whichever valid response arrives first. Project trust and MCP consent remain local-only.
-
-## Roles and permission boundaries
-
-- External Agent `owner` / `admin` can rebind or unbind its host. Only the sole remaining `owner` can archive the Agent under the Nia Teams removal rules. Rebinding/unbinding rotates `keyGeneration` and invalidates old hosts; archiving revokes connections.
-- GroupChat members may invoke the Agent and dismiss a pending card. To **approve** a TaskBar card, the clicker must also be an active member of that external Agent (`owner`, `admin`, or `member`). Nia Teams enforces this before signing a token. A same-chat non-member cannot approve.
-- The host independently verifies the confirmation JWT's signature, issuer, audience, lifetime, service identity, human confirmation, exact card ID, tool, and canonical argument digest. `clickedBy.teamRole` alone is not approval proof.
-- Agent workload identity claims (`sub`, `org:*`, `role:*`) are not human Agent-member roles. This bridge does not convert any of them into local OS permissions; its WebSocket authenticates with Ed25519 challenge/lease. The confirmation token represents the human-approved service action.
-- Local tool execution stays subject to Claude Code's permission system and sandbox. Pairing does not authorize arbitrary shell commands, alter local permissions, or rewrite host configuration.
-
-## CLI and runtime behavior
+## 3. CLI, Environment & Package Exports
 
 ```text
-nia-claude pair [--name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--timeout-ms <ms>]
-nia-claude start [--cwd <dir>] [--config-dir <dir>] [--model <model>] [--claude-bin <path>] [--full-auto]
+nia-claude connect --invite-code <code> [--user-name <name>] [--agent-name <name>]
+                   [--no-browser] [--no-start] [--cwd <dir>] [--daemon] [--log-file <path>]
+nia-claude pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-claude status [--config-dir <dir>]
-nia-claude mcp [--config-dir <dir>]
+nia-claude start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
+                   [--full-auto] [--claude-bin <path>] [--daemon] [--log-file <path>]
+nia-claude --help
 ```
 
-- Server origin: `--server-url`, then `NIA_TEAMS_URL`, then `https://nia-teams.com`; later commands use the paired origin.
-- Config directory: `--config-dir`, then `NIA_CLAUDE_CONFIG_DIR`, then `~/.config/nia-teams-claude-code`.
-- For `start`, `--cwd` defaults to the current directory; `--model` selects the Claude Code model; `--claude-bin`, `CLAUDE_BIN`, and common local install paths select the CLI; `--full-auto` enables execution without bridge confirmation.
-- Default label: `claude-code@<hostname>`; pairing timeout: 600000 ms, polling every 2 seconds.
-- Replies survive transient disconnects in a bounded, in-memory FIFO publication queue; they do not survive a process crash. Retries retain the Nia session and publication UUID.
-- Daemon `start` persists an independent SDK session per GroupChat; in interactive `mcp` Channel mode, multiple GroupChats share one host/model context. Permission requests have no chat ID: route to the most recently triggered **executing** chat, falling back to the most recently triggered tracked chat. A terminal-only request before any inbound chat stays local. Use separate host identities/sessions for isolation.
-- Channel busy activity renews every 30 seconds. Permission cards expire locally after 5 minutes. The host protocol has no remote-prompt-completed notification, so a card can remain until timeout if terminal approval wins; later verdicts for closed requests are ignored by the host.
-- Daemon cancellation aborts the SDK query and clears that chat’s input queue and pending cards. Channel GroupChat cancellation denies outstanding permissions, cancels cards and queued replies, and sets idle. A cancellation notification asks Claude to stop; the Channel protocol does not forcibly interrupt an executing local tool.
-- In Channel mode, stdin end/close, SIGINT/SIGTERM/SIGHUP, and a stdin watchdog trigger best-effort card cancellation/idle and bounded shutdown. MCP stdout contains only JSON-RPC; diagnostics use stderr. Close code `4409` stops reconnection after another host supersedes the connection.
+- `connect`: Join using an invite code; first registration requires `--user-name` and `--agent-name`. Starts the daemon unless `--no-start` is set.
+- `--daemon`: Detach and print the PID and log location; `--log-file` overrides `<config-dir>/daemon.log`. Supported in Windows PowerShell, CMD, Git Bash, macOS, and Linux.
+- `--server-url`: Pairing origin; precedence is flag, `NIA_TEAMS_URL`, then `https://nia-teams.com`. Later commands use the saved origin.
+- `--config-dir`: Explicit path overrides `NIA_CLAUDE_CONFIG_DIR` and defaults to `~/.config/nia-teams-claude-code`. Use the same directory for pair, status, and start.
+- `--name`: Pairing host label shown in browser and handshake; omission generates a host-prefixed machine label. The Agent display name can be changed in the browser.
+- `--cwd`: Project working directory; defaults to the current directory and resolves to an absolute path. It does not move credentials.
+- `--model`: Model name passed to the selected Claude Code runtime; available models depend on the Claude Code account and settings.
+- `--help` / `-h`: Show command overview; no command also displays help.
+- `--claude-bin / CLAUDE_BIN`: Select a Claude Code executable or `.js` / `.mjs` / `.cjs` entry.
+- `--full-auto`: Disable bridge tool confirmations.
 
-## Troubleshooting and development
+### Exports and embedding
 
-For daemon mode, inspect `/tmp/nia-claude.log`, `pgrep -af '[n]ia-claude.*start'`, local Claude sign-in, and `--cwd` permissions. Stop the previous connection before changing modes; GroupChat session state lives in the paired directory’s `threads.json`.
+| Entrypoint | Purpose |
+| --- | --- |
+| `nia-claude` | Pairing, identity inspection, and daemon |
+| `createClaudeRunner` | Create an SDK runner for SessionHost |
+| `resolveClaudeBinary` | Locate the Claude Code CLI |
+| `SessionHost` | GroupChat queues, session resume, cancellation, and approvals |
+| `dist/**/*.d.ts` | Exported functions, options, and runtime interfaces |
 
-`npx @nia-teams/claude-code-plugin status` failure usually means missing/rotated credentials or a wrong service origin. Re-pair locally and restart the host. If Nia Teams stays disconnected, inspect `/mcp`, host stderr/debug logs, the credential directory, and duplicate MCP registrations. A missing reply usually means the assistant wrote terminal text instead of invoking the send tool. A dropped Channel event may indicate channel opt-in or organization policy: successful transport writes do not prove the host consumed the message.
+The root module provides named exports; public export-map paths are `.` and `./package.json`. Read declarations for exact signatures and [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) for runtime and Claude Code contracts.
+
+For embedding, pass `createClaudeRunner(options)` to core `runSessionDaemon`, or own a `SessionHost` lifecycle. SDK queries and GroupChat tools share the active turn scope; models do not choose a destination chat.
+
+## 4. Approvals, GroupChat Tools & Security Boundaries
+
+![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
+
+### 1. Signed TaskBar approval flow
+
+1. A Claude Code tool permission request opens a TaskBar confirmation card bound to the current turn and request arguments.
+2. Nia Teams checks that the clicker is an active Agent `owner`, `admin`, or `member`, then signs `_meta["nia/confirmationToken"]` and returns it with `card.action`.
+3. Core uses `@nia-teams/mcp-sdk/auth` and keys from `${issuer}/oauth2/jwks` to verify RS256 signature, issuer, `aud: nia-teams-workload`, lifetime, service identity, and `human_confirmed: true`.
+4. It checks `context_server: agent-bridge`, `context_tool: claude_code.permission`, canonical-JSON argument SHA-256 digest, and `confirmation_card_id === cardId`. Expected values come from the locally stored request, not chat text.
+5. A valid result allows only that request. Missing/invalid tokens, dismissal, expiry, and cancellation deny it. Pending cards expire after five minutes by default.
+
+### 2. GroupChat tools, messages, and native mentions
+
+- `send_message({ content })` publishes Markdown or Rich HTML to the current GroupChat for progress or questions. All replies require an explicit send; turn-end text stays private.
+- `chat_history({ limit?, offset? })` paginates history; `limit` defaults to 50 in 1..100, and `offset` defaults to 0 and must be non-negative. The host supplies the Nia session; the model does not choose a chat ID.
+- GroupChat tools belong to the active turn. After interruption or Nia session rotation, old requests cannot publish into the new GroupChat session.
+
+Incoming prompts list `Members: Alice (<userId>), ...`; each message includes sender ID, timestamp, message ID, reply reference, and attachment transcripts. Generic headers may appear as `[chat:<chatId>] Alice (<userId>): ...`, or structured channels may expose `senderId`; raw bridge frames use `messages[].authorId`. Use `<mention userId="24-hex-id" />` with a received sender/member ID for native notifications.
+
+### 3. Roles and local execution boundaries
+
+- Chat members may invoke an Agent; rebinding/unpairing requires its `owner` / `admin`, and archiving follows the sole-owner rule. Card approval additionally requires active Agent membership.
+- Human membership is distinct from workload `sub`, `org:*`, and `role:*` claims. Text saying “approved” creates neither a signed confirmation nor local execution permission.
+- Ed25519 private keys stay in the config directory. Loading validates permissions, symlinks, and keypair consistency; keep credential files out of project repositories and logs.
+- Publications retain idempotency keys in a process-local FIFO during transient outages, with 256 entries / 16 MiB admission and a 512 KiB frame limit. Process exit does not persist unsent queue entries.
+- Connections use 20-second heartbeat, 60-second inbound idle timeout, and jittered backoff reconnects; `4409` terminates a superseded connection. Model session isolation is not filesystem or OS isolation.
+
+## 5. Development, Trademark & License
 
 ```sh
-npm ci
-npm run typecheck
+npm install
 npm run build
+npm run typecheck
 npm test
 npm pack --dry-run
 ```
 
-The tests use local HTTP/WebSocket servers, Ed25519 proofs, real RS256/JWKS confirmation signing, MCP in-memory clients, and stdio subprocesses. See [`examples/`](./examples/) and `dist/*.d.ts` for embedding; no live service credentials are required for tests.
+Update both READMEs, the shipped skill, declarations, and protocol specification when changing runtime interfaces or Claude Code contracts.
 
-## Trademark and license
-
-Claude and Claude Code are trademarks of Anthropic, PBC. `@nia-teams/claude-code-plugin` is maintained by Nia Teams and is not affiliated with or endorsed by Anthropic.
+Claude Code is an Anthropic product name. This package is maintained by Nia Teams and is not affiliated with Anthropic.
 
 [MIT](./LICENSE) © Nia Teams

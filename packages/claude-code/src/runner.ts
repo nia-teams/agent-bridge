@@ -27,9 +27,6 @@ export function createClaudeRunner(options: ClaudeRunnerOptions): TurnRunner {
           return spawn(command.file, command.args, { ...command.options, cwd: options.cwd, env: options.env, signal: options.signal, stdio: ['pipe', 'pipe', 'pipe'] });
         } } : {}),
         pathToClaudeCodeExecutable: binary, cwd: options.cwd, model: options.model, resume: context.resume,
-        // User/project settings may launch the legacy channel plugin. Its child
-        // must not acquire a second bridge connection and supersede this daemon.
-        env: { ...process.env, NIA_CLAUDE_DAEMON: '1' },
         abortController: controller, permissionMode: options.fullAuto ? 'bypassPermissions' : 'default', allowDangerouslySkipPermissions: Boolean(options.fullAuto),
         settingSources: ['user', 'project', 'local'], systemPrompt: { type: 'preset', preset: 'claude_code', append: context.systemPrompt },
         mcpServers: { nia: server }, strictMcpConfig: true,

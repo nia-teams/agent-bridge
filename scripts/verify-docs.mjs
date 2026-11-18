@@ -32,16 +32,12 @@ test('source Markdown follows published terminology without literal translations
 });
 
 test('adapter guides name their runtime and describe the browser pairing completion', async () => {
-  for (const name of ['codex', 'workbuddy', 'doubao', 'agy', 'droid']) {
+  for (const name of ['codex', 'claude-code', 'workbuddy', 'doubao', 'agy', 'droid']) {
     const text = await read(`packages/${name}/README_CN.md`);
     assert.ok(!text.includes('上游'), `${name}: name the product in its own guide`);
     for (const label of ['任意设备的浏览器', '新建外部 Agent', 'Paired: <Agent 名称> (@external-...)', '发起新对话', '拉进已有群聊', '临时离线', '更换主机或解绑主机', '停用归档', '常见问题排查']) assert.ok(text.includes(label), `${name}: missing ${label}`);
   }
-  const claude = await read('packages/claude-code/README_CN.md');
-  const pairing = claude.slice(claude.indexOf('### 第 2 步：'), claude.indexOf('### 第 3 步：'));
-  assert.equal((pairing.match(/1\. 填写 \*\*Agent 名称/g) ?? []).length, 1);
-  assert.ok(!pairing.includes('在运行 Claude Code 的电脑上配对一次。'));
-  assert.ok(pairing.includes('Paired: <Agent 名称> (@external-...)'));
+
 });
 
 test('all repository Markdown links and images resolve', async () => {

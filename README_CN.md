@@ -45,7 +45,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 | --- | --- | --- | --- |
 | `@nia-teams/agent-bridge-core` | 自定义 Node.js Agent | `BridgeClient` SDK | [文档](./packages/core/README_CN.md) · [skills/agent-bridge-core/SKILL.md](./packages/core/skills/agent-bridge-core/SKILL.md) |
 | `@nia-teams/codex-bridge` | OpenAI Codex | `nia-codex` | [文档](./packages/codex/README_CN.md) · [skills/nia-teams-codex/SKILL.md](./packages/codex/skills/nia-teams-codex/SKILL.md) |
-| `@nia-teams/claude-code-plugin` | Claude Code：SDK 后台 / 交互式 Channel | `nia-claude` | [文档](./packages/claude-code/README_CN.md) · [skills/nia-teams-claude-code/SKILL.md](./packages/claude-code/skills/nia-teams-claude-code/SKILL.md) |
+| `@nia-teams/claude-code-plugin` | Claude Code：SDK 守护进程 | `nia-claude` | [文档](./packages/claude-code/README_CN.md) · [skills/nia-teams-claude-code/SKILL.md](./packages/claude-code/skills/nia-teams-claude-code/SKILL.md) |
 | `@nia-teams/workbuddy-plugin` | WorkBuddy / CodeBuddy | `nia-workbuddy` | [文档](./packages/workbuddy/README_CN.md) · [skills/nia-teams-workbuddy/SKILL.md](./packages/workbuddy/skills/nia-teams-workbuddy/SKILL.md) |
 | `@nia-teams/doubao-bridge` | 豆包桌面 CDP + HTTP Runtime / 官方 CLI | `nia-doubao` | [文档](./packages/doubao/README_CN.md) · [skills/nia-teams-doubao/SKILL.md](./packages/doubao/skills/nia-teams-doubao/SKILL.md) |
 | `@nia-teams/dsh-plugin` | DeepSeek Harness | `nia-dsh` 配对，`dsh web` 执行 | [文档](./packages/dsh/README_CN.md) · [skills/nia-teams-dsh/SKILL.md](./packages/dsh/skills/nia-teams-dsh/SKILL.md) |
@@ -80,7 +80,6 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 | --- | --- | --- | --- |
 | Codex | `codex app-server` JSON-RPC | 持久化的 Codex thread | 命令/文件请求映射 TaskBar |
 | Claude Code 后台 | Claude Agent SDK `query()` | 每群独立 SDK 会话 | 将 SDK 工具权限请求显示为 TaskBar 确认卡 |
-| Claude Code Channel | `claude/channel` MCP 通知 | 交互式宿主共享上下文 | `claude/channel/permission` 与终端权限 relay |
 | WorkBuddy / CodeBuddy | CodeBuddy Agent SDK | 每群独立 SDK 会话 | 将 SDK 工具权限请求显示为 TaskBar 确认卡 |
 | 豆包 | 桌面 Cookie + HTTP Runtime 或官方 CLI | 后端前缀隔离的持久会话 | HTTP Runtime 的 AskOnRisk / FullAccess 或 CLI 权限模式 |
 | DSH | DeepSeek Harness / Cordis 服务 | 每群独立 Harness 会话 | 工具审批与审批提问映射 TaskBar |
@@ -199,14 +198,10 @@ nia-codex start --cwd "/path/to/workspace" --daemon
 
 ### 2. Claude Code（`@nia-teams/claude-code-plugin`）
 
-后台模式通过 Claude Agent SDK 运行，按群保存 SDK 会话，添加 `--strict-mcp-config`，将工具权限请求显示为 TaskBar 确认卡。Channel 模式把消息送入交互宿主，共享该宿主上下文；需要本地 Channel 授权。两种模式使用同一配对目录时二选一。
+SDK 守护进程通过 Claude Agent SDK 运行，按群保存会话，工具权限请求显示为 TaskBar 确认卡。`--model` 选择模型，`--full-auto` 跳过桥接确认，`--claude-bin` 指定本机可执行文件。
 
 ```sh
 nia-claude start --cwd "/path/to/workspace" --daemon
-# 交互式 Channel 模式：
-claude plugin marketplace add nia-teams/agent-bridge
-claude plugin install nia-teams@nia-teams --scope user
-claude --dangerously-load-development-channels plugin:nia-teams@nia-teams
 ```
 
 ### 3. WorkBuddy / CodeBuddy（`@nia-teams/workbuddy-plugin`）
@@ -274,7 +269,7 @@ Alice (<userId>) [<messageId>] <timestamp>:
 请审查当前改动。
 ```
 
-通用消息也可显示为 `[chat:<chatId>] Alice (<userId>): ...`，结构化频道可用 `senderId`。需要真正通知成员时，在发布回复中使用 `<mention userId="24-hex-id" />`；从收到的发送者或成员 ID 填入，不用显示名猜测。群聊回复使用 `send_message`；Claude Channel 还需传入通知提供的 `group_chat_id`。
+通用消息也可显示为 `[chat:<chatId>] Alice (<userId>): ...`，结构化频道可用 `senderId`。需要真正通知成员时，在发布回复中使用 `<mention userId="24-hex-id" />`；从收到的发送者或成员 ID 填入，不用显示名猜测。群聊回复使用 `send_message`。
 
 TaskBar 批准由 Nia Teams 先校验 Agent 成员身份，再签发 RS256 `nia/confirmationToken`。主机通过 `@nia-teams/mcp-sdk/auth` 和 `${issuer}/oauth2/jwks` 验证签名、issuer、audience、有效期、service 身份、人类确认、卡片 ID、工具名和 canonical JSON 参数 SHA-256 摘要。卡片绑定一个待执行操作；聊天里的“允许”或角色字段不能代替签名验证。
 
@@ -286,7 +281,7 @@ TaskBar 批准由 Nia Teams 先校验 Agent 成员身份，再签发 RS256 `nia/
 packages/
   core/          Agent Bridge transport, credentials, publications, SessionHost
   codex/         Codex app-server adapter
-  claude-code/   Claude SDK daemon and MCP Channel
+  claude-code/   Claude SDK daemon
   workbuddy/     CodeBuddy SDK and desktop authentication
   doubao/        Desktop-authenticated HTTP runtime and official CLI
   dsh/           DeepSeek Harness / Cordis plugin
