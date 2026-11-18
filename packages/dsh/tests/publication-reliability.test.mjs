@@ -155,3 +155,36 @@ test('a question answered after server acceptance but before its send acknowledg
   await bridge.start(); await bridge.rpc('group_chat.history', { sessionId });
   assert.equal(messages(f).length, 1);
 });
+
+for (const kind of ['send_message', 'question']) test(`idle immediately invalidates queued pre-idle ${kind} activity`, async t => {
+  const { f, ctx, host, agent } = await setup(t);
+  await event(ctx, 'turn/start', { turn: 1 });
+  const captured = [];
+  const enqueue = host.publications.enqueue.bind(host.publications);
+  host.publications.enqueue = publication => { captured.push(publication); return enqueue(publication); };
+  f.holdRpc.add('tool.call');
+  const pending = kind === 'send_message'
+    ? ctx.toolDefinitions.get('send_message').definition.execute({ content: 'Progress' }, { agent, callId: 'pre-idle-send', signal: new AbortController().signal })
+    : ctx.emit('user-questions/request', { agent, wait: { callId: 'pre-idle-question' }, questions: [{ id: 'q', question: 'Continue?', options: [{ label: 'Yes' }] }] });
+  await until(() => captured.length === 1 && messages(f).length === 1);
+  const publication = captured[0];
+  assert.equal(publication.shouldSyncActivity(), true);
+  const thread = host.threads.get(agentThreadId);
+  const revision = thread.activityRevision;
+  const ending = event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } });
+  await new Promise(setImmediate);
+  assert.ok(thread.activityRevision > revision);
+  assert.equal(publication.shouldSyncActivity(), false);
+  // Even reapplying the same idle object invalidates the preceding revision.
+  const idleRevision = thread.activityRevision;
+  host.setActivity(thread, thread.activity);
+  assert.ok(thread.activityRevision > idleRevision);
+  assert.equal(publication.shouldSyncActivity(), false);
+  if (kind === 'question') f.send(message('1'));
+  else {
+    const held = messages(f)[0];
+    f.socket.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: held.requestId, ok: true, result: { published: true } }));
+  }
+  await Promise.all([pending, ending]);
+  assert.equal(publication.shouldSyncActivity(), false);
+});

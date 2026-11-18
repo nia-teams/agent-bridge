@@ -13,7 +13,7 @@ export interface CollaborationTools {
 }
 /** Serve the handshake's JSON Schemas verbatim, without a lossy Zod conversion. */
 export function createToolServer(context: CollaborationTools, alwaysLoad = false): Server {
-  const server = new Server({ name: 'nia', version: '0.3.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'nia', version: '0.3.2' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: context.tools.map(({ name, description, inputSchema, deferLoading }) => ({
     name, description, inputSchema: inputSchema as { type: 'object'; [key: string]: unknown },
     ...(alwaysLoad && !deferLoading ? { _meta: { 'anthropic/alwaysLoad': true } } : {}),

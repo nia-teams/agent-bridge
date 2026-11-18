@@ -252,3 +252,79 @@ for (const injectAfterReady of [false, true]) test(`dynamic DSH tool-service inj
   assert.equal(ctx.toolDefinitions.has('send_message'), false);
   await host.close(); assert.equal(ctx.toolDefinitions.size, 0);
 });
+
+test('shared lease renews DSH executing and question waiting, reconnects, and stops before idle', async t => {
+  const { f, ctx, agent } = await setup(t, undefined, { activityRefreshMs: 40 });
+  const activities = state => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === state);
+  await event(ctx, 'turn/start', { turn: 1 });
+  await until(() => activities('executing').length >= 3);
+  const question = ctx.emit('user-questions/request', { agent, questions: [{ id: 'q', question: 'Continue?', options: [{ label: 'Yes' }] }] });
+  await until(() => activities('waiting').length >= 3);
+  const connections = f.connections;
+  f.socket.terminate(); await until(() => f.connections > connections);
+  await until(() => activities('waiting').length >= 4);
+  f.send(message('1')); await question;
+  await event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } });
+  const count = f.rpcs.filter(r => r.method === 'thread.activity').length;
+  f.socket.terminate();
+  await new Promise(resolve => setTimeout(resolve, 160));
+  assert.equal(f.rpcs.filter(r => r.method === 'thread.activity').length, count);
+  assert.equal(activities('idle').length, 1);
+});
+
+for (const newer of ['idle', 'command']) test(`pending DSH send cannot overwrite newer ${newer} activity or revive its lease`, async t => {
+  const { f, ctx, agent } = await setup(t, undefined, { activityRefreshMs: 40 });
+  await event(ctx, 'turn/start', { turn: 1 });
+  f.holdRpc.add('tool.call');
+  const sending = ctx.toolDefinitions.get('send_message').definition.execute({ content: 'Progress' }, { agent, callId: 'held-send', signal: new AbortController().signal });
+  await until(() => f.rpcs.some(r => r.params.toolCallId === 'held-send'));
+  const held = f.rpcs.find(r => r.params.toolCallId === 'held-send');
+  // Renewal stays active throughout a slow publication acknowledgment.
+  const before = f.rpcs.filter(r => r.method === 'thread.activity').length;
+  await until(() => f.rpcs.filter(r => r.method === 'thread.activity').length > before);
+  const ending = newer === 'idle'
+    ? event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } })
+    : event(ctx, 'tool/call', { turn: 1, name: 'new-command' });
+  await new Promise(setImmediate);
+  const offset = f.rpcs.length;
+  f.socket.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: held.requestId, ok: true, result: { published: true } }));
+  await Promise.all([sending, ending]);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const later = f.rpcs.slice(offset).filter(r => r.method === 'thread.activity');
+  assert.ok(later.every(r => newer === 'idle' ? r.params.state === 'idle' : r.params.label === 'Running new-command…'));
+  assert.equal(f.rpcs.filter(r => r.method === 'thread.activity').at(-1).params.state, newer === 'idle' ? 'idle' : 'executing');
+});
+
+test('question answer after turn/end cannot restore waiting or executing over idle', async t => {
+  const { f, ctx, agent } = await setup(t, undefined, { activityRefreshMs: 40 });
+  await event(ctx, 'turn/start', { turn: 1 });
+  f.holdRpc.add('tool.call');
+  const answer = ctx.emit('user-questions/request', { agent, wait: { callId: 'held-question' }, questions: [{ id: 'q', question: 'Continue?', options: [{ label: 'Yes' }] }] });
+  await until(() => f.rpcs.some(r => r.params.toolCallId === 'held-question'));
+  const ending = event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } });
+  await new Promise(setImmediate);
+  const offset = f.rpcs.length;
+  f.send(message('1'));
+  await Promise.all([answer, ending]);
+  await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.ok(f.rpcs.slice(offset).filter(r => r.method === 'thread.activity').every(r => r.params.state === 'idle'));
+});
+
+test('DSH session rotation immediately clears old activity until the next turn starts', async t => {
+  const { f, ctx, host } = await setup(t, undefined, { activityRefreshMs: 40 });
+  await event(ctx, 'turn/start', { turn: 1 });
+  await until(() => f.rpcs.filter(r => r.method === 'thread.activity').length >= 2);
+  const thread = host.threads.get(agentThreadId), revision = thread.activityRevision;
+  const nextSessionId = 'abcdef0123456789abcdef01';
+  await host.message({ ...message('New session'), sessionId: nextSessionId });
+  assert.ok(thread.activityRevision > revision);
+  assert.equal(thread.activity.state, 'idle');
+  const offset = f.rpcs.length;
+  f.socket.terminate();
+  await new Promise(resolve => setTimeout(resolve, 160));
+  assert.equal(f.rpcs.slice(offset).filter(r => r.method === 'thread.activity').length, 0);
+  await event(ctx, 'turn/start', { turn: 2 });
+  await until(() => f.rpcs.slice(offset).filter(r => r.method === 'thread.activity').length >= 2);
+  assert.ok(f.rpcs.slice(offset).filter(r => r.method === 'thread.activity').every(r => r.params.sessionId === nextSessionId));
+});

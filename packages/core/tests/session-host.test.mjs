@@ -117,3 +117,60 @@ test('arbitrary handshake tools use tool.call and preserve JSON-string content a
   assert.ok(f.rpcs.findIndex(r => r.params.name === 'send_message') < f.rpcs.findIndex(r => r.params.state === 'idle'));
   assert.deepEqual(errors, []);
 });
+
+for (const outcome of ['complete', 'cancel']) test(`active SDK executing and question leases renew, reconnect, and stop on ${outcome}`, async t => {
+  const f = await fixture(t);
+  const bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 10 });
+  let context, release;
+  const hold = new Promise(resolve => { release = resolve; });
+  const host = new SessionHost(bridge, async ctx => {
+    context = ctx;
+    await hold;
+    if (!ctx.signal.aborted) await ctx.permission('AskUserQuestion', { questions: [{ question: 'Continue?' }] });
+  }, { configDir: f.dir, runtime: 'Test', approvalTool: 'test', activityRefreshMs: 40 });
+  t.after(async () => { release(); await host.close(); bridge.close(); });
+  await host.start(); await bridge.start();
+  const frame = message(); host.message(frame);
+  const activities = state => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === state);
+  await until(() => context && activities('executing').length >= 3);
+  let connections = f.connections;
+  f.socket.terminate();
+  await until(() => f.connections > connections);
+  await until(() => activities('executing').length >= 4);
+  release();
+  await until(() => activities('waiting').filter(r => r.params.label === '等待回答').length >= 3);
+  connections = f.connections;
+  f.socket.terminate();
+  await until(() => f.connections > connections);
+  await until(() => activities('waiting').length >= 4);
+  if (outcome === 'cancel') host.cancel({ ...frame, type: 'thread.cancel', reason: 'user_aborted' });
+  else host.message({ ...message('answer'), invokedBy: frame.invokedBy });
+  await until(() => context.signal.aborted);
+  // Cancellation uses best-effort idle; successful completion uses the queue.
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const count = f.rpcs.filter(r => r.method === 'thread.activity').length;
+  f.socket.terminate();
+  await new Promise(resolve => setTimeout(resolve, 160));
+  assert.equal(f.rpcs.filter(r => r.method === 'thread.activity').length, count);
+  if (outcome === 'complete') assert.equal(activities('idle').at(-1).params.deliveryId, frame.deliveryId);
+});
+
+test('parallel SDK progress supersedes a pending send activity revision without interrupting renewal', async t => {
+  const f = await fixture(t), bridge = new BridgeClient(f.credentials);
+  let context, release;
+  const hold = new Promise(resolve => { release = resolve; });
+  const host = new SessionHost(bridge, async ctx => { context = ctx; await hold; }, { configDir: f.dir, runtime: 'Test', approvalTool: 'test', activityRefreshMs: 40 });
+  t.after(async () => { release(); await host.close(); bridge.close(); });
+  await host.start(); await bridge.start(); host.message(message());
+  await until(() => context);
+  f.holdRpc.add('tool.call'); const sending = context.send('Progress', 'held-send');
+  await until(() => f.rpcs.some(r => r.params.name === 'send_message'));
+  const held = f.rpcs.find(r => r.params.name === 'send_message');
+  await context.activity('executing', 'Running newer command…');
+  const offset = f.rpcs.length;
+  f.socket.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: held.requestId, ok: true, result: { published: true } }));
+  await sending;
+  await until(() => f.rpcs.slice(offset).some(r => r.method === 'thread.activity'));
+  assert.ok(f.rpcs.slice(offset).filter(r => r.method === 'thread.activity').every(r => r.params.label === 'Running newer command…'));
+  release(); await until(() => context.signal.aborted);
+});

@@ -31,7 +31,7 @@ test('ACP initialize, private streaming text/thoughts, durable resume and one pe
   const e = await events();
   assert.equal(e.filter(e => e.kind === 'spawn').length, 1);
   const init = e.find(e => e.method === 'initialize');
-  assert.deepEqual(init.params, { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.0' } });
+  assert.deepEqual(init.params, { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.2' } });
   const fresh = e.find(e => e.method === 'session/new'); assert.equal(fresh.params.systemPromptAppend, contract.systemPrompt);
   assert.ok(fresh.params.mcpServers[0].env.every(e => typeof e.name === 'string'));
   const saved = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'));

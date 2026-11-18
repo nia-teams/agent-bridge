@@ -5,11 +5,11 @@ import type { ExpectedHumanActionContext } from '@nia-teams/mcp-sdk/auth';
 import type { Credentials, ThreadMessage, CardAction, ThreadCancel, RpcMethod } from './types.js';
 import type { Agent, AgentHandle, AgentOptions, HostContext, ApprovalRequest, ApprovalOutcome, QuestionRequest, QuestionAnswer, SessionEvent, UserMessage, QuestionIntent } from './dsh-types.js';
 import { PublicationQueue } from './publications.js';
-import type { BridgeContract } from '@nia-teams/agent-bridge-core';
+import { ActivityLease, type BridgeContract } from '@nia-teams/agent-bridge-core';
 import { UserQuestionError, formatQuestions, parseQuestionReply } from './questions.js';
 
 export interface PluginConfig {
-  configDir?: string; serverUrl?: string; cwd?: string; agentPreset?: string; agentOptions?: AgentOptions;
+  activityRefreshMs?: number; configDir?: string; serverUrl?: string; cwd?: string; agentPreset?: string; agentOptions?: AgentOptions;
   /** Explicit host-operator preauthorization; empty by default. Never populated by a one-shot card. */
   sessionAllowTools?: string[];
 }
@@ -19,7 +19,7 @@ export interface PluginBridge {
   start(): Promise<void>; close(): void;
   rpc(method: RpcMethod, params: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>>;
   verifyCardApproval(meta: Record<string, unknown> | undefined, expected: ExpectedHumanActionContext): Promise<unknown>;
-  onReady(handler: () => void): () => void;
+  onReady: import('@nia-teams/agent-bridge-core').BridgeClient['onReady'];
   onThreadMessage(handler: (frame: ThreadMessage) => void | Promise<void>): () => void;
   onCardAction(handler: (frame: CardAction) => void | Promise<void>): () => void;
   onThreadCancel(handler: (frame: ThreadCancel) => void | Promise<void>): () => void;
@@ -56,10 +56,11 @@ export class NiaTeamsHost {
   private readonly outputs = new Map<string, Output>();
   private readonly disposers: Array<() => void> = [];
   private readonly lifetime = new AbortController();
-  private readonly refresh: ReturnType<typeof setInterval>;
+  private readonly lease: ActivityLease;
   private disposal?: Promise<void>;
   constructor(private readonly ctx: HostContext, readonly bridge: PluginBridge, private readonly config: PluginConfig = {}) {
     this.publications = new PublicationQueue(bridge);
+    this.lease = new ActivityLease(bridge, { intervalMs: config.activityRefreshMs, onError: error => this.warn(error) });
     this.disposers.push(
       bridge.onThreadMessage(frame => this.enqueue(frame.agentThreadId, () => this.message(frame))),
       bridge.onThreadCancel(frame => this.enqueue(frame.agentThreadId, () => this.cancel(frame))),
@@ -110,9 +111,6 @@ export class NiaTeamsHost {
       const dispose = () => { if (disposed) return; disposed = true; unregister(); for (const remove of registered.values()) remove(); registered.clear(); };
       this.disposers.push(dispose); toolCtx.effect(() => dispose);
     });
-    this.refresh = setInterval(() => {
-      for (const thread of this.threads.values()) if (thread.activity.state !== 'idle') void this.activity(thread, thread.activity).catch(error => this.warn(error));
-    }, 30_000);
   }
   private warn(error: unknown): void { this.ctx.logger.warn(`Nia Teams: ${error instanceof Error ? error.message : String(error)}`); }
   private enqueue(id: string, operation: () => Promise<void>): Promise<void> {
@@ -248,6 +246,11 @@ export class NiaTeamsHost {
       thread = { frame, stop: new AbortController(), allow: new Set(this.config.sessionAllowTools ?? []), activityRevision: 0, activity: { state: 'idle' } };
       this.threads.set(frame.agentThreadId, thread);
     } else {
+      if (thread.frame.sessionId !== frame.sessionId) {
+        this.lease.clear(frame.agentThreadId);
+        thread.activityRevision++;
+        thread.activity = { state: 'idle' };
+      }
       thread.frame = frame;
       if (thread.stop.signal.aborted) thread.stop = new AbortController();
     }
@@ -288,16 +291,26 @@ export class NiaTeamsHost {
     }
   }
   private setActivity(thread: Thread, value: Thread['activity']): number {
-    if (thread.activity !== value) thread.activityRevision++;
+    thread.activityRevision++;
     thread.activity = value;
+    if (value.state === 'idle') this.lease.clear(thread.frame.agentThreadId);
+    else this.lease.record(thread.frame.agentThreadId, thread.frame.sessionId, { state: value.state, label: value.label }, this.signal(thread));
     return thread.activityRevision;
   }
   private activity(thread: Thread, value: Thread['activity']): Promise<unknown> {
     this.setActivity(thread, value);
+    if (value.state !== 'idle') return this.lease.report(thread.frame.agentThreadId, thread.frame.sessionId, value.state, { label: value.label, signal: this.signal(thread) });
     return this.bridge.rpc('thread.activity', { sessionId: thread.frame.sessionId, ...value });
   }
-  private sendMessage(thread: Thread, content: string, toolCallId: string, signal?: AbortSignal) {
-    return this.publications.enqueue({ niaSessionId: thread.frame.sessionId, toolCallId, content, activityAfter: { state: 'executing', label: 'Thinking…' }, shouldSyncActivity: () => !this.signal(thread, signal).aborted, signal: this.signal(thread, signal) });
+  private async sendMessage(thread: Thread, content: string, toolCallId: string, signal?: AbortSignal) {
+    const niaSessionId = thread.frame.sessionId;
+    const publicationSignal = this.signal(thread, signal);
+    const activityAfter = { state: 'executing' as const, label: 'Thinking…' };
+    const revision = this.setActivity(thread, activityAfter);
+    await this.publications.enqueue({ niaSessionId, toolCallId, content, activityAfter,
+      shouldSyncActivity: () => !publicationSignal.aborted && thread.frame.sessionId === niaSessionId && thread.activityRevision === revision,
+      signal: publicationSignal,
+    });
   }
   private async event(sessionId: string, event: SessionEvent): Promise<void> {
     if (this.lifetime.signal.aborted) return;
@@ -426,14 +439,15 @@ export class NiaTeamsHost {
     const aborted = (): void => wait.reject(new UserQuestionError('Question aborted', 'ASK_ABORTED'));
     signal.addEventListener('abort', aborted, { once: true });
     const publicationStop = new AbortController();
+    const niaSessionId = thread.frame.sessionId;
+    const activityAfter = { state: 'waiting' as const, label: '等待回复' };
+    const revision = this.setActivity(thread, activityAfter);
+    const isCurrent = () => !signal.aborted && thread.frame.sessionId === niaSessionId && thread.activityRevision === revision;
     try {
-      const niaSessionId = thread.frame.sessionId;
-      const activityAfter = { state: 'waiting' as const, label: '等待回复' };
-      const revision = this.setActivity(thread, activityAfter);
       const publication = this.publications.enqueue({ niaSessionId,
         toolCallId: request.wait?.callId ?? `question:${randomUUID()}`,
         content: formatQuestions(request.questions, thread.frame.invokedBy?.userId), activityAfter,
-        shouldSyncActivity: () => !signal.aborted && thread.activityRevision === revision,
+        shouldSyncActivity: () => isCurrent() && (this.questions.get(id)?.includes(wait) ?? false),
         signal: AbortSignal.any([signal, publicationStop.signal]),
       });
       // A reply can arrive after the server accepted a prompt but before its RPC acknowledgment.
@@ -447,12 +461,12 @@ export class NiaTeamsHost {
       publicationStop.abort();
       signal.removeEventListener('abort', aborted);
       removeWait();
-      if (!signal.aborted) await this.activity(thread, { state: 'executing', label: 'Thinking…' }).catch(error => this.warn(error));
+      if (isCurrent()) await this.activity(thread, { state: 'executing', label: 'Thinking…' }).catch(error => this.warn(error));
     }
   }
   close(): Promise<void> {
     if (this.disposal) return this.disposal;
-    this.lifetime.abort(); this.publications.close(); clearInterval(this.refresh);
+    this.lifetime.abort(); this.publications.close(); this.lease.close();
     for (const dispose of this.disposers.splice(0).reverse()) dispose();
     this.disposal = (async () => {
       await Promise.allSettled([...this.queues.values(), ...[...this.threads.values()].flatMap(thread => thread.opening ? [thread.opening] : [])]);

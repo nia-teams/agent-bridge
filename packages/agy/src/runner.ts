@@ -55,7 +55,7 @@ export class AgyRunner {
         void client.close().finally(() => this.children.delete(client));
       };
       try {
-        const result = await client.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.0' } });
+        const result = await client.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.2' } });
         if (result.protocolVersion !== 1) throw new Error('Unsupported ACP protocol version');
         return client;
       } catch (error) { await client.close(); throw error; }

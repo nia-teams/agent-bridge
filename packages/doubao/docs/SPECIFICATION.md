@@ -64,4 +64,4 @@ To notify a member with a native Nia Teams highlight, emit `<mention userId="<us
 
 ## Shared bridge transport
 
-Version 0.3.0 uses core Agent Bridge `protocolVersion: 3`. Doubao has no model tool-calling interface: its existing final-reply publication uses the shared `send_message` queue and `tool.call` envelope. It does not synthesize tool registration or ToolSearch.
+Version 0.3.2 uses core Agent Bridge `protocolVersion: 3`. Doubao has no model tool-calling interface: its existing final-reply publication uses the shared `send_message` queue and `tool.call` envelope. It does not synthesize tool registration or ToolSearch.

@@ -421,6 +421,27 @@ Permission card identifiers use the namespace and request binding defined below.
 - Permission relay uses `verifyToolName: "claude_code.permission"` and exact `verifyArguments` as defined in section 6.
 - `cardId` uses namespace `agent_bridge:${teamId}:${agentThreadId}:perm:${request_id}:${randomUUID().slice(0, 8)}` (maximum 200 characters).
 
+### Activity lease renewal
+
+`ActivityLease` is the shared live-status keeper used by SessionHost, Codex and
+DSH. It renews active `executing` and `waiting` status every 30 seconds (RPC timeout
+5 seconds), including long-running model steps, commands and human questions. A
+ready event immediately restores the current active status after reconnect.
+`record` tracks publication activity without another immediate RPC. Hosts record
+the intended state before enqueueing a publication, keeping renewals active during
+a slow send. Its revision gates queued activity synchronization (`isCurrent`), so
+a newer command, question, idle or cancellation supersedes it. Publication
+completion never re-records an older state. One interval exists only while active
+entries remain.
+
+Before final idle publication, hosts clear the active entry synchronously. Each
+replacement or clear advances its revision and aborts its outstanding RPC signal;
+turn abort also clears the entry. Late local callbacks cannot restart a completing
+turn's lease. Closing the keeper removes its ready listener and interval. Activity
+telemetry errors are best effort and never fail a runtime turn. Cancellation cannot
+retract a frame already accepted by the server; transport ordering and the final
+idle publication determine server state, not a delayed RPC response.
+
 ### 4.3 Publication Queue
 
 The queue buffers explicitly published replies (random UUID `toolCallId`) across transient disconnects: FIFO, at most 256 entries / 16 MiB, rejected before admission if full. Individual frames including envelope overhead must fit 512 KiB. Ready events and 2-second transient-error retries flush the queue. Accepted content is not evicted. Send acknowledgments prevent resending content when only activity synchronization fails. A non-retryable RPC error rejects the entry. This is process-local, not durable storage.

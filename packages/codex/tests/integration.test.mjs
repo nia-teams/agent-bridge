@@ -38,7 +38,7 @@ test('stdio initialize → thread/start → turn/start → private agentMessage 
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
   const entries = await log();
   assert.deepEqual(entries.slice(0, 2).map(m => m.method), ['initialize', 'initialized']);
-  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.3.1' });
+  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.3.2' });
   assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length, 0);
   await host.message(message('second hold'));
   assert.equal((await log()).filter(m => m.method === 'thread/resume').length, 1);
@@ -253,4 +253,41 @@ for (const provider of ['openai', 'deepseek']) test(`provider ${provider}: defer
   assert.notEqual(next.threadId, ids.threadId);
   assert.equal(entries.filter(m => m.method === 'thread/start').length, 2);
   assert.equal(entries.filter(m => m.method === 'thread/resume').length, 0);
+});
+
+for (const outcome of ['complete', 'cancel']) test(`Codex executing/waiting leases renew and reconnect, then stop on ${outcome}`, async t => {
+  const { f, host, emit, active } = await setup(t, { activityRefreshMs: 40 });
+  const ids = await active();
+  const activities = state => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === state);
+  await until(() => activities('executing').length >= 3);
+  let connections = f.connections;
+  f.socket.terminate(); await until(() => f.connections > connections);
+  await until(() => activities('executing').length >= 4);
+  await emit({ id: 'lease-approval', method: 'item/fileChange/requestApproval', params: { ...ids, itemId: 'file' } });
+  await until(() => activities('waiting').length >= 3);
+  connections = f.connections;
+  f.socket.terminate(); await until(() => f.connections > connections);
+  await until(() => activities('waiting').length >= 4);
+  if (outcome === 'complete') await emit(complete(ids));
+  else await host.cancel({ ...message(), type: 'thread.cancel', reason: 'user_aborted' });
+  await until(() => activities('idle').length > 0);
+  const count = f.rpcs.filter(r => r.method === 'thread.activity').length;
+  f.socket.terminate();
+  await new Promise(resolve => setTimeout(resolve, 160));
+  assert.equal(f.rpcs.filter(r => r.method === 'thread.activity').length, count);
+});
+
+test('parallel Codex item activity supersedes a pending send publication and lease revision', async t => {
+  const { f, emit, active, log } = await setup(t, { activityRefreshMs: 40 });
+  const ids = await active(); f.holdRpc.add('tool.call');
+  await emit({ id: 'held-send', method: 'item/tool/call', params: { ...ids, callId: 'held-send', tool: 'send_message', arguments: { content: 'Progress' } } });
+  await until(() => f.rpcs.some(r => r.params.toolCallId === 'held-send'));
+  const held = f.rpcs.find(r => r.params.toolCallId === 'held-send');
+  await emit({ method: 'item/started', params: { ...ids, item: { id: 'command', type: 'commandExecution' } } });
+  await until(() => f.rpcs.some(r => r.params.label === 'Running command…'));
+  const offset = f.rpcs.length;
+  f.socket.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: held.requestId, ok: true, result: { published: true } }));
+  await waitResponse(log, 'held-send');
+  await until(() => f.rpcs.slice(offset).some(r => r.method === 'thread.activity'));
+  assert.ok(f.rpcs.slice(offset).filter(r => r.method === 'thread.activity').every(r => r.params.label === 'Running command…'));
 });

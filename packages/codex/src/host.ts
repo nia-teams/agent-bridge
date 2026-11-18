@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { IdleSleepGuard, PublicationQueue, resolveThreadPrompt, type BridgeClient, type ThreadMessage, type CardAction, type ThreadCancel, type ActivityState } from '@nia-teams/agent-bridge-core';
+import { ActivityLease, IdleSleepGuard, PublicationQueue, resolveThreadPrompt, type BridgeClient, type ThreadMessage, type CardAction, type ThreadCancel, type ActivityState } from '@nia-teams/agent-bridge-core';
 import { AppServer, type JsonObject, type ServerMessage } from './app-server.js';
 import { ThreadStore } from './threads.js';
 
@@ -22,14 +22,15 @@ export function dynamicToolSpecs(tools: import('@nia-teams/agent-bridge-core').B
 export function toolsFingerprint(tools: unknown): string { return createHash('sha256').update(canonicalJson(tools)).digest('hex'); }
 
 export type CodexBridge = Pick<BridgeClient, 'getContract' | 'credentials' | 'rpc' | 'onReady' | 'onThreadMessage' | 'onCardAction' | 'onThreadCancel' | 'verifyCardApproval'>;
-export interface CodexOptions { configDir: string; cwd: string; model?: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'; fullAuto?: boolean; codexBin?: string; approvalTimeoutMs?: number; onError?: (error: Error) => void }
-interface Turn { id?: string; controller: AbortController }
+export interface CodexOptions { configDir: string; cwd: string; model?: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'; fullAuto?: boolean; codexBin?: string; approvalTimeoutMs?: number; activityRefreshMs?: number; onError?: (error: Error) => void }
+interface Turn { finishing?: boolean; id?: string; controller: AbortController }
 interface Thread { frame: ThreadMessage; codexId?: string; turn?: Turn; queued: ThreadMessage[]; items: Map<string, JsonObject> }
 interface Approval { id: string | number; method: string; thread: Thread; turn: Turn; args: JsonObject; timer: ReturnType<typeof setTimeout> }
 
 /** Owns one Codex process with isolated durable GroupChat threads. */
 export class CodexHost {
   readonly app: AppServer;
+  private readonly lease: ActivityLease;
   private readonly store: ThreadStore;
   private readonly publications: PublicationQueue;
   private readonly threads = new Map<string, Thread>();
@@ -39,6 +40,7 @@ export class CodexHost {
   private closed = false;
   private readonly sleep = new IdleSleepGuard();
   constructor(private readonly bridge: CodexBridge, private readonly options: CodexOptions) {
+    this.lease = new ActivityLease(bridge, { intervalMs: options.activityRefreshMs, onError: error => this.report(error) });
     this.app = new AppServer(options.codexBin);
     this.store = new ThreadStore(options.configDir);
     this.publications = new PublicationQueue(bridge);
@@ -58,6 +60,11 @@ export class CodexHost {
     return task;
   }
   private activity(thread: Thread, state: ActivityState, label?: string, errorMessage?: string): Promise<unknown> {
+    if (state !== 'idle') {
+      if (!thread.turn || thread.turn.finishing || thread.turn.controller.signal.aborted) return Promise.resolve();
+      return this.lease.report(thread.frame.agentThreadId, thread.frame.sessionId, state, { label, signal: thread.turn.controller.signal });
+    }
+    this.lease.clear(thread.frame.agentThreadId);
     return this.bridge.rpc('thread.activity', { sessionId: thread.frame.sessionId, state, ...(state === 'idle' ? { deliveryId: thread.frame.deliveryId } : {}), ...(label ? { label } : {}), ...(errorMessage ? { errorMessage } : {}) });
   }
   private sleepGuard(): void {
@@ -66,7 +73,7 @@ export class CodexHost {
   }
   message(frame: ThreadMessage): Promise<void> {
     const previous = this.threads.get(frame.agentThreadId);
-    if (previous && previous.frame.sessionId !== frame.sessionId) previous.turn?.controller.abort();
+    if (previous && previous.frame.sessionId !== frame.sessionId) { this.lease.clear(frame.agentThreadId); previous.turn?.controller.abort(); }
     return this.serialize(frame.agentThreadId, async () => {
       if (this.closed) throw new Error('Codex host is closed');
       let thread = this.threads.get(frame.agentThreadId);
@@ -143,11 +150,15 @@ export class CodexHost {
     }
     if (message.method === 'turn/completed') {
       if (turn.id && p.turn?.id !== turn.id) return;
+      turn.finishing = true;
+      this.lease.clear(thread.frame.agentThreadId);
       await this.serialize(thread.frame.agentThreadId, async () => {
         if (thread.turn !== turn) return;
         const frame = thread.frame;
+        this.lease.clear(frame.agentThreadId);
         await this.cancelCards(thread);
         try {
+          this.lease.clear(frame.agentThreadId);
           await this.publications.enqueue({ niaSessionId: frame.sessionId, toolCallId: `turn:${thread.codexId}:${turn.id}`, content: undefined, activityAfter: { state: 'idle', deliveryId: frame.deliveryId, ...(p.turn?.error ? { errorMessage: p.turn.error.message ?? String(p.turn.error) } : {}) }, shouldSyncActivity: () => thread.turn === turn && thread.frame.sessionId === frame.sessionId, signal: turn.controller.signal });
         } catch (error) {
           if (turn.controller.signal.aborted) return;
@@ -164,7 +175,7 @@ export class CodexHost {
     const p = message.params ?? {};
     const id = message.id!;
     try {
-      if (!thread?.turn || p.turnId !== thread.turn.id) throw new Error('No matching active GroupChat turn');
+      if (!thread?.turn || thread.turn.finishing || p.turnId !== thread.turn.id) throw new Error('No matching active GroupChat turn');
       const turn = thread.turn;
       const args = p.arguments;
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Expected object arguments');
@@ -175,7 +186,9 @@ export class CodexHost {
       const toolCallId = String(p.callId ?? randomUUID());
       if (p.tool === 'send_message') {
         if (typeof args.content !== 'string' || !args.content.trim()) throw new Error('Expected nonempty content');
-        await this.publications.enqueue({ niaSessionId: thread.frame.sessionId, toolCallId, content: args.content, activityAfter: { state: 'executing', label: 'Thinking in Codex…' }, shouldSyncActivity: () => thread.turn === turn, signal: turn.controller.signal });
+        const frame = thread.frame;
+        const revision = this.lease.record(frame.agentThreadId, frame.sessionId, { state: 'executing', label: 'Thinking in Codex…' }, turn.controller.signal);
+        await this.publications.enqueue({ niaSessionId: frame.sessionId, toolCallId, content: args.content, activityAfter: { state: 'executing', label: 'Thinking in Codex…' }, shouldSyncActivity: () => !turn.controller.signal.aborted && thread.turn === turn && !turn.finishing && thread.frame.sessionId === frame.sessionId && this.lease.isCurrent(frame.agentThreadId, revision), signal: turn.controller.signal });
         content = '消息已发布到聊天';
       } else {
         const result = await this.bridge.rpc('tool.call', { sessionId: thread.frame.sessionId, toolCallId, name: p.tool, arguments: args }, turn.controller.signal);
@@ -252,6 +265,7 @@ export class CodexHost {
     if (this.closed) return;
     this.closed = true;
     for (const off of this.unregister) off();
+    this.lease.close();
     this.publications.close();
     await Promise.all([...this.threads.values()].map(t => this.stopTurn(t).catch(e => this.report(e))));
     this.app.close(); this.sleep.close();

@@ -16,7 +16,7 @@ tar xzf openai-codex-0.167.0-linux-x64.tgz
 
 ## JSONL handshake
 
-One JSON object per newline over stdin/stdout; requests/responses include numeric or string IDs. The bridge sends JSON-RPC 2.0 envelopes. Initialize clientInfo is `{ name: "nia-teams-codex-bridge", title: "Nia Teams Codex Bridge", version: "0.3.1" }` with `capabilities: { experimentalApi: true }`; wait for its response, then notify `initialized` with `{}`.
+One JSON object per newline over stdin/stdout; requests/responses include numeric or string IDs. The bridge sends JSON-RPC 2.0 envelopes. Initialize clientInfo is `{ name: "nia-teams-codex-bridge", title: "Nia Teams Codex Bridge", version: "0.3.2" }` with `capabilities: { experimentalApi: true }`; wait for its response, then notify `initialized` with `{}`.
 
 ## Thread and turn shapes
 
