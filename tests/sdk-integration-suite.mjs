@@ -70,7 +70,7 @@ export function sdkIntegrationSuite(runtime, createRunner, binKey, approvalTool)
     const { f, host } = await setup(t); host.message(message('question'));
     await until(() => sends(f).length === 1, 'question published', 10000);
     assert.match(sends(f)[0].params.content, /Choose a color/);
-    assert.ok(f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'waiting'));
+    await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'waiting'), 'question waiting activity', 10000);
     host.message(message('Blue'));
     await until(() => idle(f).length === 1, 'answered idle', 10000);
     assert.equal(sends(f).length, 1);

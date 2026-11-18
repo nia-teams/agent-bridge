@@ -1,6 +1,6 @@
 # Agent Bridge protocol map
 
-The shared transport contract is [core Agent Bridge v2](../packages/core/docs/SPECIFICATION.md). It defines Ed25519 pairing, challenge/lease authentication, WebSocket frames, publication RPCs and signed TaskBar confirmation verification. The repository has six client adapter packages plus the shared core (seven packages total). Adapter documents describe only their additional runtime contracts:
+The shared transport contract is [core Agent Bridge v2](../packages/core/docs/SPECIFICATION.md). It defines Ed25519 pairing, challenge/lease authentication, WebSocket frames, publication RPCs and signed TaskBar confirmation verification. The repository has seven client adapter packages plus the shared core (eight packages total). Adapter documents describe only their additional runtime contracts:
 
 | Adapter | Runtime contract |
 | --- | --- |
@@ -10,6 +10,7 @@ The shared transport contract is [core Agent Bridge v2](../packages/core/docs/SP
 | Doubao | [Desktop CDP, HTTP runtime and official CLI](../packages/doubao/docs/SPECIFICATION.md) |
 | DSH | [Harness host protocol](../packages/dsh/docs/SPECIFICATION.md) |
 | Antigravity | [ACP stdio sessions, streaming, permissions, scoped MCP](../packages/agy/docs/SPECIFICATION.md) |
+| Factory Droid | [Native TypeScript SDK, sessions, MCP, permissions](../packages/droid/docs/SPECIFICATION.md) |
 
 Agent Bridge 0.2.0 uses WebSocket `protocolVersion: 2`. Nia Teams supplies collaboration instructions in `ready.systemPrompt` and tool definitions (`name`, `description`, `inputSchema`) in `ready.tools`. Model-facing `send_message` and `chat_history` map to `group_chat.send_message` and `group_chat.history`. Turn completion reports idle with `deliveryId`; silent-turn reminders arrive as server `thread.message` prompts.
 
@@ -53,6 +54,6 @@ One host owns each credential directory. Tool permission requires a verified sig
 
 ## Invite-code connection
 
-Core owns `connectWithInvite`, `runInviteConnectCli`, and HTTP(S)-only browser launch. All six adapters expose `connect --invite-code`; five runtime CLIs start a background `start` process after foreground connection, while DSH leaves execution to `dsh web`. Local host availability is checked before registration unless `--no-start` is supplied. Invite-only arguments are not forwarded to the daemon.
+Core owns `connectWithInvite`, `runInviteConnectCli`, and HTTP(S)-only browser launch. All seven adapters expose `connect --invite-code`; six runtime CLIs start a background `start` process after foreground connection, while DSH leaves execution to `dsh web`. Local host availability is checked before registration unless `--no-start` is supplied. Invite-only arguments are not forwarded to the daemon.
 
 The [invite protocol](../packages/core/docs/SPECIFICATION.md#invite-code-registration-and-group-creation) defines normalization, signed registration, credential reuse, and response fields. Existing-credential challenge failures are terminal and do not trigger replacement registration. CLI and SDK usage for the external `connect-skills` skill is documented in [invite-code onboarding](./INVITE-CONNECT.md).

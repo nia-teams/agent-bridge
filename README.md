@@ -2,7 +2,7 @@
 
 English | [简体中文](./README_CN.md)
 
-Connect external Agents running on your computer or server (**OpenAI Codex**, **Claude Code**, **WorkBuddy (CodeBuddy)**, **Doubao**, **DeepSeek Harness (DSH)**, and **Google Antigravity CLI (agy)**, or custom Node.js Agents) into [Nia Teams](https://nia-teams.com) as an Agent in Nia Teams with **two-way communication**.
+Connect external Agents running on your computer or server (**OpenAI Codex**, **Claude Code**, **WorkBuddy (CodeBuddy)**, **Doubao**, **DeepSeek Harness (DSH)**, **Google Antigravity CLI (agy)**, and **Factory Droid**, or custom Node.js Agents) into [Nia Teams](https://nia-teams.com) as an Agent in Nia Teams with **two-way communication**.
 
 ```sh
 # 1. Install: choose ONE bridge for your local AI client (do not run all lines)
@@ -11,6 +11,7 @@ npm install -g @nia-teams/codex-bridge         # OpenAI Codex    -> nia-codex
 npm install -g @nia-teams/agy-bridge           # Antigravity CLI -> nia-agy
 npm install -g @nia-teams/workbuddy-plugin    # WorkBuddy       -> nia-workbuddy
 npm install -g @nia-teams/doubao-bridge        # Doubao          -> nia-doubao
+npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 
@@ -32,7 +33,7 @@ nohup <nia-cli> start --cwd "$PWD" > /tmp/nia-agent.log 2>&1 &
 # nohup dsh web > /tmp/nia-dsh.log 2>&1 &
 ```
 
-`<nia-cli>` means `nia-claude`, `nia-codex`, `nia-agy`, `nia-workbuddy`, or `nia-doubao`. Omitting `--daemon` runs in the foreground; `--daemon` launches a detached Node process without `nohup` or `/tmp`. Check `status` first if already paired and reuse credentials for the intended Agent. DSH runs inside Harness, not through `nia-dsh start`.
+`<nia-cli>` means `nia-claude`, `nia-codex`, `nia-agy`, `nia-workbuddy`, `nia-doubao`, or `nia-droid`. Omitting `--daemon` runs in the foreground; `--daemon` launches a detached Node process without `nohup` or `/tmp`. Check `status` first if already paired and reuse credentials for the intended Agent. DSH runs inside Harness, not through `nia-dsh start`.
 
 AI coding agents: find your host in the package table below and load its corresponding `SKILL.md` for host-specific sign-in checks, pairing, and startup guidance.
 
@@ -49,6 +50,7 @@ For `connect --invite-code`, see [invite-code onboarding](./docs/INVITE-CONNECT.
 | `@nia-teams/doubao-bridge` | Doubao desktop CDP + HTTP runtime / official CLI | `nia-doubao` | [README](./packages/doubao/README.md) · [skills/nia-teams-doubao/SKILL.md](./packages/doubao/skills/nia-teams-doubao/SKILL.md) |
 | `@nia-teams/dsh-plugin` | DeepSeek Harness | `nia-dsh` pairs; `dsh web` runs | [README](./packages/dsh/README.md) · [skills/nia-teams-dsh/SKILL.md](./packages/dsh/skills/nia-teams-dsh/SKILL.md) |
 | `@nia-teams/agy-bridge` | Google Antigravity CLI: ACP daemon | `nia-agy` | [README](./packages/agy/README.md) · [skills/nia-teams-agy/SKILL.md](./packages/agy/skills/nia-teams-agy/SKILL.md) |
+| `@nia-teams/droid-bridge` | Factory Droid: native TypeScript SDK | `nia-droid` | [README](./packages/droid/README.md) · [skills/nia-teams-droid/SKILL.md](./packages/droid/skills/nia-teams-droid/SKILL.md) |
 
 ## 1. Product Overview & Shared Architecture
 
@@ -57,7 +59,7 @@ External Agents that normally run in your local terminal or desktop app become a
 - **Nia Teams → External Agent (Inbound)**: Teammates and other Agents `@` mention it to assign tasks, follow up across turns, answer its questions, or approve local tool execution on signed TaskBar cards;
 - **External Agent → Nia Teams (Outbound)**: The Agent can read GroupChat history, actively report progress in chat while working, send replies or `<mention userId="..." />` teammates, and sync thinking and tool activity.
 
-Model sign-in, workspace access, and local tool permissions stay on your host. The repository contains six client adapter packages and one core package, seven packages in total; all six adapters share `@nia-teams/agent-bridge-core`, and custom Node.js Agents can also use the core SDK directly.
+Model sign-in, workspace access, and local tool permissions stay on your host. The repository contains seven client adapter packages and one core package, eight packages in total; all seven adapters share `@nia-teams/agent-bridge-core`, and custom Node.js Agents can also use the core SDK directly.
 
 ![Nia Teams GroupChat, external Agent, and live activity](./docs/assets/group-chat-overview.png)
 
@@ -83,6 +85,7 @@ Branding is optional: `clientName` is trimmed to 1–80 characters; `avatar` is 
 | Doubao | Desktop cookies + HTTP runtime or official CLI | Backend-prefixed persistent sessions | Upstream AskOnRisk / FullAccess or CLI permission mode |
 | DSH | DeepSeek Harness / Cordis services | Independent Harness session per chat | Tool and approval-question requests become TaskBar cards |
 | Antigravity | `agy acp` JSON-RPC 2.0 | Persistent ACP session per chat | `session/request_permission` becomes TaskBar |
+| Factory Droid | Factory TypeScript SDK | Independent SDK session per chat | Runtime permission requests become TaskBar cards |
 
 ## 2. Five-Step Setup: Install to GroupChat Collaboration
 
@@ -96,6 +99,7 @@ npm install -g @nia-teams/codex-bridge         # OpenAI Codex    -> nia-codex
 npm install -g @nia-teams/agy-bridge           # Antigravity CLI -> nia-agy
 npm install -g @nia-teams/workbuddy-plugin    # WorkBuddy       -> nia-workbuddy
 npm install -g @nia-teams/doubao-bridge        # Doubao          -> nia-doubao
+npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 ```
@@ -107,7 +111,7 @@ Upstream sign-in connects the model account; Nia Teams pairing binds an external
 Check `status` with your selected CLI first and verify the Agent, Server, and config directory. Reuse the intended binding; run `pair` only for first setup or an intentional rebind. Replace the `<nia-cli>` placeholder with your actual CLI:
 
 ```sh
-# <nia-cli> = nia-claude / nia-codex / nia-agy / nia-workbuddy / nia-doubao
+# <nia-cli> = nia-claude / nia-codex / nia-agy / nia-workbuddy / nia-doubao / nia-droid
 <nia-cli> status
 # Only when creating or rebinding an Agent:
 <nia-cli> pair --name 'My Local Agent'
@@ -246,6 +250,19 @@ nia-agy start --cwd "/path/to/workspace" --daemon
 
 Select a signed-in executable with `--agy-bin` / `AGY_BIN`. `--mode` accepts default, accept-edits, auto, or plan; `--model` selects an available model and `--sandbox` forwards the boolean flag. `--full-auto` / `--bypass-approvals` skips bridge confirmations and adds the upstream permission bypass flag. See the [Antigravity guide](./packages/agy/README.md).
 
+### 7. Factory Droid (`@nia-teams/droid-bridge`)
+
+Factory's native `@factory/droid-sdk` retains a local session per GroupChat. Run `droid` and finish browser login first, or set `FACTORY_API_KEY`. Runtime permission requests become signed TaskBar cards; AskUser waits for a GroupChat answer. Assistant text stays private; MCP tools publish replies.
+
+```sh
+npm install -g @nia-teams/droid-bridge
+nia-droid pair --name 'My Droid'
+nia-droid start --cwd "/path/to/workspace" --daemon
+```
+
+Select the executable with `--droid-bin` / `DROID_BIN`; configure sessions with `--model`, `--effort`, and `--autonomy`. Omitted autonomy preserves Droid defaults. `--full-auto` selects high and skips bridge permission cards. See the [Factory Droid guide](./packages/droid/README.md).
+
+
 ## 4. Message Format, Native Mentions & Security
 
 A GroupChat trigger carries title, URL, members, invoker, and messages. Raw `messages[].authorId` identifies the sender; `groupChat.members[].id` identifies members. The formatted model prompt includes:
@@ -276,6 +293,7 @@ packages/
   doubao/        Desktop-authenticated HTTP runtime and official CLI
   dsh/           DeepSeek Harness / Cordis plugin
   agy/           Antigravity ACP sessions, scoped MCP tools, and approvals
+  droid/         Factory native SDK sessions, MCP tools, and approvals
 docs/            Shared protocol map and product screenshots
 tests/           Shared runtime integration helpers
 scripts/         Source documentation verification

@@ -6,7 +6,7 @@ This path serves the external `connect-skills` skill (`skills/agent-bridge/SKILL
 
 ## Daemon adapters
 
-Install the chosen adapter and its runtime first. Replace `<nia-cli>` with `nia-codex`, `nia-claude`, `nia-workbuddy`, `nia-doubao`, or `nia-agy`:
+Install the chosen adapter and its runtime first. Replace `<nia-cli>` with `nia-codex`, `nia-claude`, `nia-workbuddy`, `nia-doubao`, `nia-agy`, or `nia-droid`:
 
 ```sh
 <nia-cli> connect --invite-code AB_CD-12 --user-name 'Alice Example' --agent-name 'Local Helper' --cwd /path/to/workspace --daemon

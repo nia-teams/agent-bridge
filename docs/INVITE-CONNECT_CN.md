@@ -6,7 +6,7 @@
 
 ## 守护进程适配器
 
-先安装所选适配器及其运行环境。将 `<nia-cli>` 替换为 `nia-codex`、`nia-claude`、`nia-workbuddy`、`nia-doubao` 或 `nia-agy`：
+先安装所选适配器及其运行环境。将 `<nia-cli>` 替换为 `nia-codex`、`nia-claude`、`nia-workbuddy`、`nia-doubao`、`nia-agy` 或 `nia-droid`：
 
 ```sh
 <nia-cli> connect --invite-code AB_CD-12 --user-name 'Alice Example' --agent-name 'Local Helper' --cwd /path/to/workspace --daemon

@@ -1,0 +1,52 @@
+{
+  "name": "@nia-teams/droid-bridge",
+  "version": "0.2.0",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "nia-droid": "./bin/nia-droid.mjs"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "README_CN.md",
+    "skills",
+    "docs",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@nia-teams/agent-bridge-core": "^0.2.1",
+    "@factory/droid-sdk": "^0.10.0",
+    "zod": "^3.25.0"
+  },
+  "author": "Nia Teams",
+  "homepage": "https://nia-teams.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nia-teams/agent-bridge.git",
+    "directory": "packages/droid"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "description": "Connect Factory Droid to Nia Teams group chats through the native Droid SDK"
+}

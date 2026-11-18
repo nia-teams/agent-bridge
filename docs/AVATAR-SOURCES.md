@@ -14,6 +14,8 @@ Sources retrieved 2026-11-10 (brand marks belong to their respective owners):
 - WorkBuddy: application icon extracted from WorkBuddy.app and resized to 256×256.
 - Doubao: https://lf-flow-web-cdn.doubao.com/obj/flow-doubao/favicon/new-doubao/192x192.png (official application icon, resized to 256×256).
 
+- Factory Droid: 256×256 PNG rasterized from the Factory Droid brand mark for this adapter (2026-11-18).
+
 
 ## Protocol
 

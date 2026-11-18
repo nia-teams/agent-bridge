@@ -6,7 +6,7 @@ import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const adapters = ['codex', 'claude-code', 'workbuddy', 'doubao', 'dsh', 'agy'];
+const adapters = ['codex', 'claude-code', 'workbuddy', 'doubao', 'dsh', 'agy', 'droid'];
 
 const paths = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(path => path.endsWith('.md'));
 const read = path => readFile(join(root, path), 'utf8');
@@ -32,7 +32,7 @@ test('source Markdown follows published terminology without literal translations
 });
 
 test('adapter guides name their runtime and describe the browser pairing completion', async () => {
-  for (const name of ['codex', 'workbuddy', 'doubao', 'agy']) {
+  for (const name of ['codex', 'workbuddy', 'doubao', 'agy', 'droid']) {
     const text = await read(`packages/${name}/README_CN.md`);
     assert.ok(!text.includes('上游'), `${name}: name the product in its own guide`);
     for (const label of ['任意设备的浏览器', '新建外部 Agent', 'Paired: <Agent 名称> (@external-...)', '发起新对话', '拉进已有群聊', '临时离线', '更换主机或解绑主机', '停用归档', '常见问题排查']) assert.ok(text.includes(label), `${name}: missing ${label}`);
@@ -60,19 +60,19 @@ test('package CLI, process checks, environment variables and install names do no
     const ownCli = name === 'claude-code' ? 'claude' : name;
     for (const path of paths.filter(path => path.startsWith(`packages/${name}/`))) {
       const text = (await read(path)).replaceAll('[n]ia-', 'nia-');
-      for (const [, cli] of text.matchAll(/\bnia-(codex|claude|workbuddy|doubao|dsh|agy)\b/g)) assert.equal(cli, ownCli, `${path}: wrong CLI ${cli}`);
-      for (const [, env] of text.matchAll(/\bNIA_(CODEX|CLAUDE|WORKBUDDY|DOUBAO|DSH|AGY)_CONFIG_DIR\b/g)) assert.equal(env.toLowerCase(), ownCli, `${path}: wrong config environment variable`);
+      for (const [, cli] of text.matchAll(/\bnia-(codex|claude|workbuddy|doubao|dsh|agy|droid)\b/g)) assert.equal(cli, ownCli, `${path}: wrong CLI ${cli}`);
+      for (const [, env] of text.matchAll(/\bNIA_(CODEX|CLAUDE|WORKBUDDY|DOUBAO|DSH|AGY|DROID)_CONFIG_DIR\b/g)) assert.equal(env.toLowerCase(), ownCli, `${path}: wrong config environment variable`);
       for (const pkg of packages.filter((_, j) => j !== i && names[j] !== 'core')) assert.ok(!text.includes(pkg.name), `${path}: unexpected package ${pkg.name}`);
     }
   }
 });
 
-test('root guides list core plus six adapters in the same order and nest launch sections 1–6', async () => {
+test('root guides list core plus seven adapters in the same order and nest launch sections 1–7', async () => {
   const order = ['core', ...adapters];
   for (const path of ['README.md', 'README_CN.md']) {
     const text = await read(path);
     assert.deepEqual([...text.matchAll(/^  ([a-z-]+)\/ /gm)].map(match => match[1]), order, path);
-    assert.deepEqual([...text.matchAll(/^### ([1-6])\. /gm)].map(match => Number(match[1])), [1, 2, 3, 4, 5, 6], path);
+    assert.deepEqual([...text.matchAll(/^### ([1-7])\. /gm)].map(match => Number(match[1])), [1, 2, 3, 4, 5, 6, 7], path);
     const packageTable = text.slice(text.indexOf('| ---'), text.indexOf('\n## ', text.indexOf('| ---')));
     const manifests = await Promise.all(order.map(name => read(`packages/${name}/package.json`).then(JSON.parse)));
     let previous = -1;
@@ -83,12 +83,12 @@ test('root guides list core plus six adapters in the same order and nest launch 
     }
   }
   const spec = await read('docs/SPECIFICATION.md');
-  assert.deepEqual([...spec.matchAll(/^\| (Codex|Claude Code|WorkBuddy|Doubao|DSH|Antigravity) \|/gm)].map(match => match[1]), ['Codex', 'Claude Code', 'WorkBuddy', 'Doubao', 'DSH', 'Antigravity']);
-  assert.match(await read('README_CN.md'), /Doubao）\*\*、\*\*DeepSeek Harness（DSH）\*\* 与 \*\*Google Antigravity/);
-  assert.match(await read('README.md'), /\*\*DeepSeek Harness \(DSH\)\*\*, and \*\*Google Antigravity/);
+  assert.deepEqual([...spec.matchAll(/^\| (Codex|Claude Code|WorkBuddy|Doubao|DSH|Antigravity|Factory Droid) \|/gm)].map(match => match[1]), ['Codex', 'Claude Code', 'WorkBuddy', 'Doubao', 'DSH', 'Antigravity', 'Factory Droid']);
+  assert.match(await read('README_CN.md'), /Doubao）\*\*、\*\*DeepSeek Harness（DSH）\*\*、\*\*Google Antigravity[^\n]+Factory Droid/);
+  assert.match(await read('README.md'), /\*\*DeepSeek Harness \(DSH\)\*\*, \*\*Google Antigravity[^\n]+Factory Droid/);
 });
 
-test('root entry and common setup cover all six platforms without a default Codex walkthrough', async () => {
+test('root entry and common setup cover all seven platforms without a default Codex walkthrough', async () => {
   const manifests = await Promise.all(adapters.map(name => read(`packages/${name}/package.json`).then(JSON.parse)));
   for (const path of ['README.md', 'README_CN.md']) {
     const text = await read(path);
@@ -113,7 +113,7 @@ test('root entry and common setup cover all six platforms without a default Code
     // Placeholders are explanatory, not executable: validate snippets after substitution.
     for (const section of [entry, common]) {
       for (const [, snippet] of section.matchAll(/```sh\n([\s\S]*?)\n```/g)) {
-        for (const cli of ['nia-claude', 'nia-codex', 'nia-agy', 'nia-workbuddy', 'nia-doubao']) execFileSync('sh', ['-n'], { input: snippet.replaceAll('<nia-cli>', cli) });
+        for (const cli of ['nia-claude', 'nia-codex', 'nia-agy', 'nia-workbuddy', 'nia-doubao', 'nia-droid']) execFileSync('sh', ['-n'], { input: snippet.replaceAll('<nia-cli>', cli) });
       }
     }
   }
@@ -136,7 +136,7 @@ test('source Markdown has a real H1 and no frontmatter except Skill metadata', a
 });
 
 test('daemon guides document portable launch, private logs, and readiness checks', async () => {
-  for (const name of ['claude-code', 'codex', 'agy', 'workbuddy', 'doubao']) {
+  for (const name of ['claude-code', 'codex', 'agy', 'workbuddy', 'doubao', 'droid']) {
     const skill = await read(`packages/${name}/skills/nia-teams-${name}/SKILL.md`);
     assert.match(skill, /start --cwd "\." --daemon/);
     assert.match(skill, /--log-file/);
@@ -177,7 +177,7 @@ test('Chinese guides use Chinese prose and section headings', async () => {
   for (const path of paths.filter(path => /(?:README_CN|INVITE-CONNECT_CN)\.md$/.test(path))) {
     const text = (await read(path)).replace(/^```[^\n]*\n[\s\S]*?^```/gm, '');
     for (const line of text.split('\n')) {
-      if (/^#{2,} /.test(line) && !(path === 'README_CN.md' && /^### [1-6]\. /.test(line))) assert.match(line, /[\u4e00-\u9fff]/, `${path}: ${line}`);
+      if (/^#{2,} /.test(line) && !(path === 'README_CN.md' && /^### [1-7]\. /.test(line))) assert.match(line, /[\u4e00-\u9fff]/, `${path}: ${line}`);
       assert.doesNotMatch(line, /(?:绝不|一律|严格|无缝|确保|完整|精确)/, path);
       assert.ok(!/^[A-Za-z][^\u4e00-\u9fff]*[.!]$/.test(line), `${path}: untranslated prose: ${line}`);
     }
@@ -190,5 +190,19 @@ test('user-facing adapter guides omit internal wire fields', async () => {
     [`packages/${name}/README.md`, `packages/${name}/README_CN.md`])];
   for (const path of guides) {
     assert.doesNotMatch(await read(path), /ready\.systemPrompt|ready\.tools|protocolVersion:\s*2|deliveryId|silent-turn|`v2:/, path);
+  }
+});
+
+test('Droid Skill uses the canonical adapter directory in source, guides, and package files', async () => {
+  const skill = 'skills/nia-teams-droid/SKILL.md';
+  await access(join(root, 'packages/droid', skill));
+  assert.match(await read(`packages/droid/${skill}`), /^name: nia-teams-droid$/m);
+  const manifest = JSON.parse(await read('packages/droid/package.json'));
+  assert.ok(manifest.files.includes('skills'));
+  for (const path of ['README.md', 'README_CN.md']) {
+    assert.ok((await read(path)).includes(`./packages/droid/${skill}`), path);
+    const guide = await read(`packages/droid/${path}`);
+    assert.ok(guide.includes(`./${skill}`), path);
+    assert.ok(guide.includes(`node_modules/${manifest.name}/${skill}`), path);
   }
 });

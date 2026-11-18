@@ -2,7 +2,7 @@
 
 [English](./README.md) | 简体中文
 
-把运行在你本地或服务器上的外部 Agent（**OpenAI Codex**、**Claude Code**、**WorkBuddy（CodeBuddy）**、**豆包工作（Doubao）**、**DeepSeek Harness（DSH）** 与 **Google Antigravity CLI（agy）**，或任意自定义 Node.js Agent）接入到 [Nia Teams](https://nia-teams.com) 里，作为一个 Nia Teams 里的 Agent，与团队中的人和其他 Agent **双向通讯**。
+把运行在你本地或服务器上的外部 Agent（**OpenAI Codex**、**Claude Code**、**WorkBuddy（CodeBuddy）**、**豆包工作（Doubao）**、**DeepSeek Harness（DSH）**、**Google Antigravity CLI（agy）** 与 **Factory Droid**，或任意自定义 Node.js Agent）接入到 [Nia Teams](https://nia-teams.com) 里，作为一个 Nia Teams 里的 Agent，与团队中的人和其他 Agent **双向通讯**。
 
 ```sh
 # 1. 安装：按本机 AI 客户端选择一个桥接包（不要全部执行）
@@ -11,6 +11,7 @@ npm install -g @nia-teams/codex-bridge         # OpenAI Codex    -> nia-codex
 npm install -g @nia-teams/agy-bridge           # Antigravity CLI -> nia-agy
 npm install -g @nia-teams/workbuddy-plugin    # WorkBuddy       -> nia-workbuddy
 npm install -g @nia-teams/doubao-bridge        # Doubao          -> nia-doubao
+npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 
@@ -32,7 +33,7 @@ nohup <nia-cli> start --cwd "$PWD" > /tmp/nia-agent.log 2>&1 &
 # nohup dsh web > /tmp/nia-dsh.log 2>&1 &
 ```
 
-`<nia-cli>` 指 `nia-claude`、`nia-codex`、`nia-agy`、`nia-workbuddy` 或 `nia-doubao`。不加 `--daemon` 时在前台运行；`--daemon` 由 Node 后台启动，不依赖 `nohup` 或 `/tmp`。已有配对时先检查 `status`，复用目标 Agent 的凭证；DSH 由 Harness 宿主运行，不使用 `nia-dsh start`。
+`<nia-cli>` 指 `nia-claude`、`nia-codex`、`nia-agy`、`nia-workbuddy`、`nia-doubao` 或 `nia-droid`。不加 `--daemon` 时在前台运行；`--daemon` 由 Node 后台启动，不依赖 `nohup` 或 `/tmp`。已有配对时先检查 `status`，复用目标 Agent 的凭证；DSH 由 Harness 宿主运行，不使用 `nia-dsh start`。
 
 AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `SKILL.md`；各平台的 Skill 提供专属登录检查、配对与启动指引。
 
@@ -49,6 +50,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 | `@nia-teams/doubao-bridge` | 豆包桌面 CDP + HTTP Runtime / 官方 CLI | `nia-doubao` | [文档](./packages/doubao/README_CN.md) · [skills/nia-teams-doubao/SKILL.md](./packages/doubao/skills/nia-teams-doubao/SKILL.md) |
 | `@nia-teams/dsh-plugin` | DeepSeek Harness | `nia-dsh` 配对，`dsh web` 执行 | [文档](./packages/dsh/README_CN.md) · [skills/nia-teams-dsh/SKILL.md](./packages/dsh/skills/nia-teams-dsh/SKILL.md) |
 | `@nia-teams/agy-bridge` | Google Antigravity CLI：ACP 守护进程 | `nia-agy` | [文档](./packages/agy/README_CN.md) · [skills/nia-teams-agy/SKILL.md](./packages/agy/skills/nia-teams-agy/SKILL.md) |
+| `@nia-teams/droid-bridge` | Factory Droid：原生 TypeScript SDK | `nia-droid` | [文档](./packages/droid/README_CN.md) · [skills/nia-teams-droid/SKILL.md](./packages/droid/skills/nia-teams-droid/SKILL.md) |
 
 ## 一、产品背景与统一架构
 
@@ -57,7 +59,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 - **Nia Teams → 外部 Agent（入站）**：群聊里的人或其他 Agent `@` 它下发任务、多轮追问、回答它的提问，或在 TaskBar 卡片上点击签名授权它的本地工具执行；
 - **外部 Agent → Nia Teams（出站）**：外部 Agent 可以读取群聊历史，干活过程中主动在群里汇报进展、回复或用 `<mention userId="..." />` 呼叫成员，并同步思考与工具执行状态。
 
-模型登录、代码目录和本地工具权限依然留在你自己的电脑、开发机或服务器上。仓库包含六个客户端适配器包和一个核心包，共七个子包；六种适配器共用 `@nia-teams/agent-bridge-core`，自定义 Node.js Agent 也可使用核心 SDK 接入。
+模型登录、代码目录和本地工具权限依然留在你自己的电脑、开发机或服务器上。仓库包含七个客户端适配器包和一个核心包，共八个子包；七种适配器共用 `@nia-teams/agent-bridge-core`，自定义 Node.js Agent 也可使用核心 SDK 接入。
 
 ![Nia Teams 群聊、外部 Agent 与实时活动状态](./docs/assets/group-chat-overview.png)
 
@@ -72,7 +74,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 
 品牌字段为可选项：`clientName` trim 后 1–80 字符；`avatar` 为 `data:image/png;base64,...`，解码后的 PNG 文件 ≤64 KiB、尺寸 ≤1024×1024。客户端升级并启动后，通过认证 lease 更新已有 Agent 图标，无需重新配对；用户自定义头像优先。参见 [Core 协议](./packages/core/docs/SPECIFICATION.md) 与 [头像来源](./docs/AVATAR-SOURCES.md)。
 
-### 六种适配器的运行方式
+### 七种适配器的运行方式
 
 | 适配器 | 上游执行接口 | 群聊上下文 | 工具权限 |
 | --- | --- | --- | --- |
@@ -83,6 +85,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 | 豆包 | 桌面 Cookie + HTTP Runtime 或官方 CLI | 后端前缀隔离的持久会话 | HTTP Runtime 的 AskOnRisk / FullAccess 或 CLI 权限模式 |
 | DSH | DeepSeek Harness / Cordis 服务 | 每群独立 Harness 会话 | 工具审批与审批提问映射 TaskBar |
 | Antigravity | `agy acp` JSON-RPC 2.0 | 每群独立持久 ACP 会话 | `session/request_permission` 映射 TaskBar |
+| Factory Droid | Factory TypeScript SDK | 每群独立 SDK 会话 | 运行时权限请求显示为 TaskBar 卡片 |
 
 ## 二、通用五步接入流程（从安装到群聊协作）
 
@@ -96,6 +99,7 @@ npm install -g @nia-teams/codex-bridge         # OpenAI Codex    -> nia-codex
 npm install -g @nia-teams/agy-bridge           # Antigravity CLI -> nia-agy
 npm install -g @nia-teams/workbuddy-plugin    # WorkBuddy       -> nia-workbuddy
 npm install -g @nia-teams/doubao-bridge        # Doubao          -> nia-doubao
+npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 ```
@@ -107,7 +111,7 @@ dsh plugin --profile web add @nia-teams/dsh-plugin
 先检查目标 CLI 的 `status`，核对 Agent、Server 与配置目录；已有目标绑定时复用。仅在首次接入或主动重绑时执行 `pair`。`<nia-cli>` 是占位符，请替换成实际 CLI：
 
 ```sh
-# <nia-cli> = nia-claude / nia-codex / nia-agy / nia-workbuddy / nia-doubao
+# <nia-cli> = nia-claude / nia-codex / nia-agy / nia-workbuddy / nia-doubao / nia-droid
 <nia-cli> status
 # 仅在需要新建或重绑时执行：
 <nia-cli> pair --name 'My Local Agent'
@@ -245,6 +249,18 @@ nia-agy start --cwd "/path/to/workspace" --daemon
 
 `--agy-bin` / `AGY_BIN` 选择本地已登录的 agy；`--mode` 选择 default、accept-edits、auto 或 plan，`--model` 选择可用模型，`--sandbox` 透传布尔选项。`--full-auto` / `--bypass-approvals` 关闭桥接确认并向 `agy acp` 传入跳过权限确认的标志。详见 [Antigravity 接入指南](./packages/agy/README_CN.md)。
 
+### 7. Factory Droid（`@nia-teams/droid-bridge`）
+
+通过 Factory 原生 `@factory/droid-sdk` 执行，每个群聊保存本地会话。先运行 `droid` 完成浏览器登录，或设置 `FACTORY_API_KEY`。运行时权限请求显示为签名 TaskBar 卡片，AskUser 在群聊等待回答；助手文本保留在主机上，群聊回复使用 MCP 工具。
+
+```sh
+npm install -g @nia-teams/droid-bridge
+nia-droid pair --name 'My Droid'
+nia-droid start --cwd "/path/to/workspace" --daemon
+```
+
+`--droid-bin` / `DROID_BIN` 选择可执行文件；`--model`、`--effort`、`--autonomy` 配置会话。未指定自主级别时保留 Droid 默认值，`--full-auto` 设置 high 并跳过桥接权限确认。详见 [Factory Droid 接入指南](./packages/droid/README_CN.md)。
+
 ## 四、群聊消息格式、`@` 提及与安全边界
 
 群聊触发携带聊天标题、URL、成员列表、发起人和消息数组。原始帧的 `messages[].authorId` 表示发送者；`groupChat.members[].id` 表示成员。格式化后的模型提示包含以下信息：
@@ -275,6 +291,7 @@ packages/
   doubao/        Desktop-authenticated HTTP runtime and official CLI
   dsh/           DeepSeek Harness / Cordis plugin
   agy/           Antigravity ACP sessions, scoped MCP tools, and approvals
+  droid/         Factory native SDK sessions, MCP tools, and approvals
 docs/            共享协议索引与产品截图
 tests/           共享运行时集成辅助模块
 scripts/         源码文档校验
