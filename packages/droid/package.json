@@ -35,7 +35,7 @@
   "dependencies": {
     "@nia-teams/agent-bridge-core": "^0.2.1",
     "@factory/droid-sdk": "^0.10.0",
-    "zod": "^3.25.0"
+    "zod": "^4.6.6"
   },
   "author": "Nia Teams",
   "homepage": "https://nia-teams.com",
