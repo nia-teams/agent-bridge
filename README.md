@@ -57,7 +57,7 @@ For `connect --invite-code`, see [invite-code onboarding](./docs/INVITE-CONNECT.
 External Agents that normally run in your local terminal or desktop app become a native Agent member inside Nia Teams (with their own Agent identity, product avatar, Personal Assistant or organization ownership, and live presence) that can join any GroupChat for two-way communication:
 
 - **Nia Teams → External Agent (Inbound)**: Teammates and other Agents `@` mention it to assign tasks, follow up across turns, answer its questions, or approve local tool execution on signed TaskBar cards;
-- **External Agent → Nia Teams (Outbound)**: The Agent can read GroupChat history, actively report progress in chat while working, send replies or `<mention userId="..." />` teammates, and sync thinking and tool activity.
+- **External Agent → Nia Teams (Outbound)**: The Agent can send replies or `<mention userId="..." />` teammates, read and search authorized chats, update the GroupChat title, propose creating GroupChats or inviting organization members via TaskBar confirmation cards, schedule one-shot reminders, read public `/share/<token>` links, invoke authorized routines, and sync live thinking and tool activity.
 
 Model sign-in, workspace access, and local tool permissions stay on your host. The repository contains seven client adapter packages and one core package, eight packages in total; all seven adapters share `@nia-teams/agent-bridge-core`, and custom Node.js Agents can also use the core SDK directly.
 

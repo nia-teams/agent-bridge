@@ -27,7 +27,7 @@ export class McpRelay {
   register(context: TurnContext): { env: Array<{ name: string; value: string }>; revoke(): void } {
     if (!this.url) throw new Error('MCP relay is not started');
     const token = randomBytes(32).toString('base64url'); this.scopes.set(token, context);
-    return { env: [{ name: 'NIA_AGY_MCP_URL', value: this.url }, { name: 'NIA_AGY_MCP_TOKEN', value: token }, { name: 'NIA_AGY_MCP_TOOLS', value: JSON.stringify(context.tools) }], revoke: () => { this.scopes.delete(token); } };
+    return { env: [{ name: 'NIA_AGY_MCP_URL', value: this.url }, { name: 'NIA_AGY_MCP_TOKEN', value: token }, { name: 'NIA_AGY_MCP_TOOLS', value: JSON.stringify(context.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))) }], revoke: () => { this.scopes.delete(token); } };
   }
   private async handle(req: AsyncIterable<Buffer>, context: TurnContext, res: ServerResponse): Promise<void> {
     const chunks: Buffer[] = []; let size = 0;
@@ -35,15 +35,8 @@ export class McpRelay {
     context.signal.throwIfAborted();
     const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!isObject(body) || !isObject(body.arguments)) throw new Error('Invalid tool request');
-    const args = body.arguments; let result: unknown;
-    if (body.name === 'send_message') {
-      if (Object.keys(args).some(k => k !== 'content') || typeof args.content !== 'string' || !args.content.trim()) throw new Error('Invalid send arguments');
-      await context.send(args.content); result = { message: '消息已发布到聊天', published: true };
-    } else if (body.name === 'chat_history') {
-      const limit = args.limit ?? 50, offset = args.offset ?? 0;
-      if (Object.keys(args).some(k => !['limit', 'offset'].includes(k)) || !Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 100 || !Number.isInteger(offset) || Number(offset) < 0) throw new Error('Invalid history range');
-      result = await context.history(Number(limit), Number(offset));
-    } else throw new Error('Unknown tool');
+    if (typeof body.name !== 'string' || !context.tools.some(tool => tool.name === body.name)) throw new Error('Unknown tool');
+    const result = await context.callTool(body.name, body.arguments);
     context.signal.throwIfAborted();
     if (!res.destroyed) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ result })); }
   }
@@ -52,7 +45,7 @@ export class McpRelay {
     if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
   }
 }
-export async function callRelay(name: string, args: unknown, url = process.env.NIA_AGY_MCP_URL, token = process.env.NIA_AGY_MCP_TOKEN): Promise<unknown> {
+export async function callRelay(name: string, args: unknown, url = process.env.NIA_AGY_MCP_URL, token = process.env.NIA_AGY_MCP_TOKEN): Promise<import('@nia-teams/agent-bridge-core').ToolCallResult> {
   if (!url || !token) throw new Error('Missing MCP turn scope');
   const endpoint = new URL(url);
   if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || endpoint.pathname !== '/tool' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid MCP loopback endpoint');
@@ -60,5 +53,6 @@ export async function callRelay(name: string, args: unknown, url = process.env.N
   if (!response.ok) throw new Error('GroupChat tool unavailable');
   const result: unknown = await response.json();
   if (!isObject(result)) throw new Error('Invalid GroupChat tool response');
-  return result.result;
+  if (!isObject(result.result) || typeof result.result.content !== 'string') throw new Error('Invalid tool content');
+  return { content: result.result.content, ...(result.result.isError ? { isError: true } : {}) };
 }

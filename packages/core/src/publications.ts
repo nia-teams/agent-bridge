@@ -45,7 +45,7 @@ export class PublicationQueue {
       if (previous.content !== publication.content) throw new Error('Publication idempotency key reused with different content');
       return previous.completion;
     }
-    const params = { sessionId: publication.niaSessionId, toolCallId: publication.toolCallId, content: publication.content };
+    const params = { sessionId: publication.niaSessionId, toolCallId: publication.toolCallId, name: 'send_message', arguments: { content: publication.content } };
     const messageBytes = Buffer.byteLength(JSON.stringify(params));
     const activityBytes = Buffer.byteLength(JSON.stringify({ sessionId: publication.niaSessionId, ...publication.activityAfter }));
     const bytes = messageBytes + activityBytes;
@@ -95,7 +95,8 @@ export class PublicationQueue {
       const entry = this.pendingPublications.values().next().value!;
       try {
         if (!entry.published) {
-          await this.bridge.rpc('group_chat.send_message', { sessionId: entry.niaSessionId, toolCallId: entry.toolCallId, content: entry.content }, entry.controller.signal);
+          const result = await this.bridge.rpc('tool.call', { sessionId: entry.niaSessionId, toolCallId: entry.toolCallId, name: 'send_message', arguments: { content: entry.content } }, entry.controller.signal);
+          if (result.isError) throw new BridgeRpcError('publication_failed', String(result.content ?? result.message ?? 'Message publication failed'), false);
           entry.published = true;
         }
         if (!entry.controller.signal.aborted && entry.shouldSyncActivity()) {

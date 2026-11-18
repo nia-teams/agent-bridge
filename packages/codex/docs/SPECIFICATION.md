@@ -1,6 +1,6 @@
 # Codex app-server protocol contract
 
-The adapter loads `ready.systemPrompt` and dynamic tool definitions from `ready.tools`. Replies require explicit `send_message`; terminal and turn-end text remain private. Persisted thread mappings carry `protocolVersion: 2`; only matching mappings resume. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
+The adapter loads `ready.systemPrompt` and dynamic tool definitions from `ready.tools`. Replies require explicit `send_message`; terminal and turn-end text remain private. Persisted thread mappings carry `protocolVersion: 3`; only mappings with the current canonical dynamic-tool SHA-256 fingerprint resume. A missing or changed fingerprint starts a fresh thread; `thread/resume` cannot update tools. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
 
 ## Source and reproduction
 
@@ -16,12 +16,13 @@ tar xzf openai-codex-0.167.0-linux-x64.tgz
 
 ## JSONL handshake
 
-One JSON object per newline over stdin/stdout; requests/responses include numeric or string IDs. The bridge sends JSON-RPC 2.0 envelopes. Initialize clientInfo is `{ name: "nia-teams-codex-bridge", title: "Nia Teams Codex Bridge", version: "0.2.0" }` with `capabilities: { experimentalApi: true }`; wait for its response, then notify `initialized` with `{}`.
+One JSON object per newline over stdin/stdout; requests/responses include numeric or string IDs. The bridge sends JSON-RPC 2.0 envelopes. Initialize clientInfo is `{ name: "nia-teams-codex-bridge", title: "Nia Teams Codex Bridge", version: "0.3.0" }` with `capabilities: { experimentalApi: true }`; wait for its response, then notify `initialized` with `{}`.
 
 ## Thread and turn shapes
 
+- `config/read`: `{ includeLayers: false, cwd }` resolves the effective `config.model_provider` before thread creation. `deferLoading: true` is passed only for provider `openai`; other providers receive normal dynamic tools (Codex #44984).
 - `thread/start`: `cwd`, `model`, `developerInstructions`, `approvalPolicy`, `approvalsReviewer`, `sandbox`, `dynamicTools`. Response is `{ thread: { id, ... }, ... }`; the adapter also accepts `threadId` for an external compatibility window requested by the integration contract.
-- Dynamic tool specs require **`type: "function"`**, `name`, `description`, `inputSchema` in 0.167.0. Flat specs without `type` are not this schema.
+- Dynamic tool specs require **`type: "function"`**, `name`, `description`, `inputSchema` in 0.167.0. Optional `deferLoading: true` is preserved for the OpenAI provider. Flat specs without `type` are not this schema.
 - `thread/resume`: `threadId` and runtime overrides. **No `dynamicTools` parameter**; tools belong to the saved thread. Response contains `thread.id`.
 - `turn/start`: `threadId`, `input: [{ type: "text", text, text_elements: [] }]`. The generated text input includes **`text_elements`**. Response contains `turn.id`.
 - `turn/steer`: `threadId`, `input`, **`expectedTurnId` required**.
@@ -33,6 +34,8 @@ One JSON object per newline over stdin/stdout; requests/responses include numeri
 ## Bidirectional tools
 
 Server request `item/tool/call`: `{ threadId, turnId, callId, namespace, tool, arguments }`. Response: `{ contentItems: [{ type: "inputText", text }], success: boolean }`. This is not MCP `content`/`isError`.
+
+Every advertised tool is callable by name through `tool.call`. Returned `content` is passed to `inputText` verbatim; `success` is false when `isError` is true. `send_message` retains publication queuing and idempotency.
 
 `send_message` accepts `{ content: string }`; `chat_history` accepts `{ limit?: 1..100, offset?: integer >= 0 }`. The host supplies the active Nia session ID; models cannot choose another chat/session.
 
@@ -47,7 +50,7 @@ Server request `item/tool/call`: `{ threadId, turnId, callId, namespace, tool, a
 
 TaskBar cards bind `verifyToolName: "codex.approval"`, request arguments and the card ID. `verifyCardApproval` delegates RS256 issuer/audience/signature/expiry and context validation to core's MCP SDK verifier. A UI decision alone grants nothing. Timeout, cancellation, failed verification, turn interruption and session rotation decline pending requests and cancel cards. Unknown server requests receive `-32601`; no implied approval.
 
-Agent Bridge v2 signing and wire shapes are specified in `../../core/docs/SPECIFICATION.md`.
+Agent Bridge v3 signing and wire shapes are specified in `../../core/docs/SPECIFICATION.md`.
 
 ## GroupChat sender identity and mentions
 

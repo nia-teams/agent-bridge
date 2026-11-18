@@ -40,12 +40,13 @@ async function prompt(text) {
     log({ askResult: AskUserResultSchema.parse(result) });
   }
   if (text.includes('permission') || text.includes('collaboration')) {
-    const name = text.includes('collaboration scoped') ? 'send_message' : text.includes('collaboration mcp') ? 'mcp__nia__chat_history' : text.includes('collaboration') ? 'nia___send_message' : text.includes('spoof') ? 'AskUserQuestion' : 'Execute';
+    const name = text.includes('collaboration future') ? 'mcp__nia__future_tool' : text.includes('collaboration scoped') ? 'send_message' : text.includes('collaboration mcp') ? 'mcp__nia__chat_history' : text.includes('collaboration') ? 'nia___send_message' : text.includes('spoof') ? 'AskUserQuestion' : 'Execute';
     notify({ type: 'tool_call', toolUse: { type: 'tool_use', id: 'exec', name, input: { command: 'echo test' } } });
     const result = await request('droid.request_permission', { toolUses: [{ toolUse: { type: 'tool_use', id: 'exec', name, ...(text.includes('scoped') ? { namespace: 'nia' } : {}), input: { command: 'echo test' } }, confirmationType: 'exec', details: { type: 'exec', fullCommand: 'echo test', command: 'echo test' } }], options: [{ label: "Allow once", value: "proceed_once" }, { label: "Cancel", value: "cancel" }] });
     log({ permissionResult: result });
   }
-  if (text.includes('use tools') || text.includes('system-reminder')) {
+  if (text.includes('use tools') || text.includes('future tools') || text.includes('system-reminder')) {
+    if (text.includes('future tools')) await mcp('future_tool', { value: 'new' });
     await mcp('chat_history', text.includes('default history') ? {} : { limit: 2, offset: 0 });
     await mcp('send_message', { content: 'Droid interim' });
   }

@@ -1,4 +1,4 @@
-# Nia Teams Agent Bridge v2 Specification
+# Nia Teams Agent Bridge v3 Specification
 
 Wire-level contract between Nia Teams (`https://nia-teams.com`) and external Agent hosts implemented by `@nia-teams/dsh-plugin` (`src/pairing.ts`, `src/bridge-client.ts`, `src/types.ts`, and `src/plugin.ts`). `teamId`, `groupChatId`, and Nia `sessionId` are 24-character hex identifiers (`teamId` identifies the paired Agent).
 
@@ -151,7 +151,7 @@ Default directory precedence: explicit `configDir`, `NIA_DSH_CONFIG_DIR`, `~/.co
 
 `saveCredentials` creates/chmods the directory to `0700` (checking `lstat(configDir).isDirectory()` to reject symlinks on the target directory), writes a temporary file with mode `0600`, and atomically renames it to `credentials.json`. `loadCredentials` checks `lstat(path).isFile()` (which rejects symlinks and non-regular files) and requires no POSIX group/other permission bits (`(mode & 0o077) === 0`), validates all fields, and verifies that `publicKeyPem` matches the public key derived from `privateKeyPem`.
 
-## 2. WebSocket Transport (`/ws/agent-bridge`, `protocolVersion: 2`)
+## 2. WebSocket Transport (`/ws/agent-bridge`, `protocolVersion: 3`)
 
 ### 2.1 Handshake & Heartbeat
 
@@ -160,7 +160,7 @@ Immediately after opening `gatewayUrl`, the client sends:
 ```json
 {
   "type": "hello",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "teamId": "65f000000000000000000002",
   "lease": "<single-use lease>",
   "hostLabel": "dsh@build-server"
@@ -172,7 +172,7 @@ First server frame (`ReadyFrame`):
 ```json
 {
   "type": "ready",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "systemPrompt": "Server collaboration policy",
   "tools": [
     { "name": "send_message", "description": "Publish a reply", "inputSchema": { "type": "object", "properties": { "content": { "type": "string" } }, "required": ["content"] } },
@@ -189,14 +189,18 @@ First server frame (`ReadyFrame`):
 }
 ```
 
+Each tool is `{ name: string, description: string, inputSchema: Record<string, unknown>, deferLoading?: boolean }`. JSON Schemas are preserved verbatim. `deferLoading` must be absent or boolean; it is a host loading hint, not an extra model tool. Hosts without native ToolSearch register every tool normally. A reconnect replaces the contract from the new handshake.
+
+`tool.call` passes `{ sessionId, toolCallId, name, arguments }`; the server returns `{ content: string, isError?: boolean }`. Content is already formatted text (including JSON strings), not an object to encode again. `send_message` retains the FIFO publication queue and its publication-before-idle ordering. A successful RPC containing `isError: true` rejects publication; retryable RPC errors retain queue entries. The legacy `group_chat.*` RPC names remain transport types but are not used by model-facing tools.
+
 `BridgeClient.getContract()` exposes the latest `systemPrompt` and `tools`. The server owns collaboration policy, Rich HTML instructions, tool descriptions/schemas, and prompt formatting.
 
-The client validates `protocolVersion === 2`, `agent.teamId === credentials.teamId`, `issuer === credentials.issuer`, and initializes the RS256 confirmation verifier with `${credentials.serverUrl}/oauth2/jwks`.
+The client validates `protocolVersion === 3`, `agent.teamId === credentials.teamId`, `issuer === credentials.issuer`, and initializes the RS256 confirmation verifier with `${credentials.serverUrl}/oauth2/jwks`.
 
-Frames are UTF-8 JSON text objects up to 512 KiB (`512 * 1024` bytes). Handshake and `ready` each enforce a 15s timeout. Once ready, the client sends a heartbeat every 20s and closes the socket if no valid version-2 frame arrives within 60s:
+Frames are UTF-8 JSON text objects up to 512 KiB (`512 * 1024` bytes). Handshake and `ready` each enforce a 15s timeout. Once ready, the client sends a heartbeat every 20s and closes the socket if no valid version-3 frame arrives within 60s:
 
 ```json
-{ "type": "heartbeat", "protocolVersion": 2, "at": 1793664000000 }
+{ "type": "heartbeat", "protocolVersion": 3, "at": 1793664000000 }
 ```
 
 | Close code | Meaning | Client behavior |
@@ -223,7 +227,7 @@ All push frames share `PushBase`:
 
 ```ts
 interface PushBase {
-  protocolVersion: 2;
+  protocolVersion: 3;
   deliveryId: string;
   groupChatId: string;   // 24-hex
   sessionId: string;     // 24-hex Nia session ID
@@ -294,7 +298,7 @@ When all registered push handlers for an inbound frame resolve, the client sends
 ```json
 {
   "type": "ack",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "sessionId": "65f000000000000000000003",
   "deliveryId": "<deliveryId>"
 }
@@ -311,10 +315,10 @@ Request (`rpc.request`, default 30s timeout):
 ```json
 {
   "type": "rpc.request",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "requestId": "<UUID>",
-  "method": "group_chat.history",
-  "params": { "sessionId": "65f000000000000000000003", "limit": 50, "offset": 0 }
+  "method": "tool.call",
+  "params": { "sessionId": "65f000000000000000000003", "toolCallId": "<UUID>", "name": "chat_history", "arguments": { "limit": 50, "offset": 0 } }
 }
 ```
 
@@ -323,10 +327,10 @@ Success response (`rpc.response`):
 ```json
 {
   "type": "rpc.response",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "requestId": "<same UUID>",
   "ok": true,
-  "result": { "messages": [] }
+  "result": { "content": "Earlier messages", "isError": false }
 }
 ```
 
@@ -335,21 +339,22 @@ Error response (`rpc.response`, raises `BridgeRpcError(code, message, retryable)
 ```json
 {
   "type": "rpc.response",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "requestId": "<same UUID>",
   "ok": false,
   "error": { "code": "invalid_request", "message": "Invalid parameters", "retryable": false }
 }
 ```
 
-Turn completion sends `thread.activity` with `state: 'idle'` and the processed `deliveryId`, without reply content. Model-facing `send_message` and `chat_history` map to transport RPCs `group_chat.send_message` and `group_chat.history`. Terminal output and SDK results are not publications.
+Turn completion sends `thread.activity` with `state: 'idle'` and the processed `deliveryId`, without reply content. All model-facing tools invoke `tool.call` with host-bound session context. Terminal output and SDK results are not publications.
 
 ### 4.2 RPC Methods
 
 | Method | Parameters (`params`) | Description |
 | --- | --- | --- |
-| `group_chat.send_message` | `sessionId`, `content: string`, `toolCallId: string` | Publish a message to the GroupChat (`toolCallId` provides server-side idempotency) |
-| `group_chat.history` | `sessionId`, `limit: number` (`1..100`), `offset: number` (`>= 0`) | Read earlier GroupChat messages |
+| `tool.call` | `sessionId`, `toolCallId: string`, `name: string`, `arguments: object` | Execute any tool advertised by the latest handshake (primary v3 method, including `send_message` and `chat_history`); returns `{ content: string, isError?: boolean, published?: boolean, message?: string }` |
+| `group_chat.send_message` | `sessionId`, `content: string`, `toolCallId: string` | Legacy v1/v2 alias for `send_message` retained on the server for backward compatibility |
+| `group_chat.history` | `sessionId`, `limit: number` (`1..100`), `offset: number` (`>= 0`) | Legacy v1/v2 alias for `chat_history` retained on the server for backward compatibility |
 | `card.upsert` | `sessionId`, `toolCallId`, `cardId`, `title`, `subtitle`, `description?`, `actionLabel: "允许执行"`, `verifyToolName`, `verifyArguments` | Create or update a pending TaskBar confirmation card |
 | `card.cancel` | `sessionId`, `cardId: string` | Cancel a pending TaskBar card |
 | `thread.activity` | `sessionId`, `state: "executing" \| "waiting" \| "idle"`, `label?: string`, `errorMessage?: string`, `deliveryId?: string` | Update live Agent activity status in the GroupChat |
@@ -403,3 +408,7 @@ The host verifies `_meta` via `verifyHumanActionContext(action._meta, { server: 
 Incoming messages carry sender metadata, for example `[chat:<chatId>] Alice (<userId>): ...`, or `senderId` in structured channel payloads. This bridge's raw `thread.message` uses `messages[].authorId`; its formatted prompt lists `Alice (<userId>)` and member IDs. Use the received sender/member ID, not the display name.
 
 To notify a member with a native Nia Teams highlight, emit `<mention userId="<userId>" />` in the published reply. Plain `@Name` is text, not a real mention. Do not invent IDs; consult the member list/history if needed.
+
+## Dynamic harness registration
+
+On tool-service injection and each `onReady`, the host synchronizes registrations with `getContract().tools`, adding new tools and disposing removed ones. Until first ready, send/history placeholders supply the initial names. Native DSH has no ToolSearch, so loading hints are ignored. Every advertised collaboration tool bypasses the local approval hook; Nia Teams performs ACL checks and confirmation. `send_message` uses the publication queue and marks `toolSent`; other tools use `tool.call` with the owning session, call ID and combined cancellation signal. String output is rendered once.

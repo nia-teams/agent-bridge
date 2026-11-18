@@ -15,7 +15,7 @@ export function sdkIntegrationSuite(runtime, createRunner, binKey, approvalTool)
     return { f, host, errors, contexts };
   }
   const idle = f => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle');
-  const sends = f => f.rpcs.filter(r => r.method === 'group_chat.send_message');
+  const sends = f => f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message'));
   test(`${runtime}: server reminder resumes local SDK session and only explicit tools publish`, async t => {
     const { f, contexts } = await setup(t);
     const first = message(); f.send(first); await until(() => idle(f).length === 1);
@@ -25,7 +25,7 @@ export function sdkIntegrationSuite(runtime, createRunner, binKey, approvalTool)
     assert.equal(contexts[1].prompt, reminder.prompt); assert.ok(contexts[1].resume);
     assert.equal(contexts[1].systemPrompt, contract.systemPrompt); assert.deepEqual(contexts[1].tools, contract.tools);
     assert.equal(idle(f)[1].params.deliveryId, reminder.deliveryId);
-    assert.deepEqual(sends(f).map(r => r.params.content), ['SDK interim']);
+    assert.deepEqual(sends(f).map(r => r.params.arguments.content), ['SDK interim']);
   });
   test(`${runtime}: real SDK initialize, query, private result and durable resume`, async t => {
     const { f, host, errors } = await setup(t); host.message(message('hello'));
@@ -36,15 +36,15 @@ export function sdkIntegrationSuite(runtime, createRunner, binKey, approvalTool)
     host.message(message('second'));
     await until(() => idle(f).length === 2, 'second idle', 10000);
     assert.equal(JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'))[agentThreadId].sessionId, saved[agentThreadId].sessionId);
-    assert.deepEqual(sends(f).map(r => r.params.content), []);
+    assert.deepEqual(sends(f).map(r => r.params.arguments.content), []);
     assert.deepEqual(errors, []);
   });
   test(`${runtime}: real in-process MCP history/send tool routing and no duplicate natural final`, async t => {
     const { f, host, errors } = await setup(t); host.message(message('use tools'));
     await until(() => sends(f).length === 1, 'MCP publication', 10000);
     await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'), 'MCP idle', 10000);
-    assert.equal(sends(f)[0].params.content, 'SDK interim');
-    assert.equal(f.rpcs.find(r => r.method === 'group_chat.history').params.sessionId, sessionId);
+    assert.equal(sends(f)[0].params.arguments.content, 'SDK interim');
+    assert.equal(f.rpcs.find(r => (r.method === 'tool.call' && r.params.name === 'chat_history')).params.sessionId, sessionId);
     assert.deepEqual(errors, []);
   });
   for (const outcome of ['approved', 'tampered', 'canceled']) test(`${runtime}: canUseTool → signed TaskBar ${outcome}`, async t => {
@@ -69,7 +69,7 @@ export function sdkIntegrationSuite(runtime, createRunner, binKey, approvalTool)
   test(`${runtime}: AskUserQuestion waits for invoking human's GroupChat answer`, async t => {
     const { f, host } = await setup(t); host.message(message('question'));
     await until(() => sends(f).length === 1, 'question published', 10000);
-    assert.match(sends(f)[0].params.content, /Choose a color/);
+    assert.match(sends(f)[0].params.arguments.content, /Choose a color/);
     await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'waiting'), 'question waiting activity', 10000);
     host.message(message('Blue'));
     await until(() => idle(f).length === 1, 'answered idle', 10000);

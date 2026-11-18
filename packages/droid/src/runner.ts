@@ -1,6 +1,5 @@
-import { createSession, resumeSession, ProcessTransport, createSdkMcpServer, tool, AutonomyLevel, ReasoningEffort, ToolConfirmationOutcome, SessionNotFoundError, type DroidSession, type CreateSessionOptions } from '@factory/droid-sdk/node';
-import { z } from 'zod';
-import { findTool, findExecutable, type TurnRunner } from '@nia-teams/agent-bridge-core';
+import { createSession, resumeSession, ProcessTransport, AutonomyLevel, ReasoningEffort, ToolConfirmationOutcome, SessionNotFoundError, type DroidSession, type CreateSessionOptions } from '@factory/droid-sdk/node';
+import { ToolHttpServer, findExecutable, type TurnRunner } from '@nia-teams/agent-bridge-core';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
@@ -28,17 +27,16 @@ export function createDroidRunner(options: DroidOptions): TurnRunner {
   return async context => {
     const binary = await resolveDroidBinary(options.droidBin);
     context.signal.throwIfAborted();
-    const server = createSdkMcpServer({ name: 'nia', version: '0.2.0', tools: [
-      tool('send_message', findTool(context.tools, 'send_message').description, { content: z.string().trim().min(1) }, async ({ content }) => { await context.send(content); return { content: [{ type: 'text', text: '消息已发布到聊天' }] }; }),
-      tool('chat_history', findTool(context.tools, 'chat_history').description, { limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() }, async ({ limit, offset }) => ({ content: [{ type: 'text', text: JSON.stringify(await context.history(limit, offset)) }] }), { annotations: { readOnlyHint: true } }),
-    ] });
+    const server = new ToolHttpServer(context);
+    const endpoint = await server.start();
+    const mcpConfig = { type: 'http' as const, name: 'nia', url: endpoint.url, headers: Object.entries(endpoint.headers).map(([name, value]) => ({ name, value })) };
     let transport: ProcessTransport | undefined, session: DroidSession | undefined;
     const settings = { ...(options.model !== undefined ? { modelId: options.model } : {}), ...(options.effort !== undefined ? { reasoningEffort: options.effort as ReasoningEffort } : {}), ...(options.fullAuto ? { autonomyLevel: AutonomyLevel.High } : options.autonomy !== undefined ? { autonomyLevel: options.autonomy as AutonomyLevel } : {}) };
     const handlers: Pick<CreateSessionOptions, 'permissionHandler' | 'askUserHandler'> = {
       permissionHandler: async params => {
         for (const entry of params.toolUses) {
           const { name, namespace, input } = entry.toolUse;
-          const collaboration = ['nia___send_message', 'nia___chat_history', 'mcp__nia__send_message', 'mcp__nia__chat_history'].includes(name) || (namespace === 'nia' && ['send_message', 'chat_history'].includes(name));
+          const collaboration = namespace === 'nia' || name.startsWith('nia___') || name.startsWith('mcp__nia__');
           if (collaboration) continue;
           if (context.signal.aborted) return { selectedOption: ToolConfirmationOutcome.Cancel };
           if (options.fullAuto) continue;
@@ -59,7 +57,7 @@ export function createDroidRunner(options: DroidOptions): TurnRunner {
       context.signal.throwIfAborted();
       transport = new ProcessTransport({ droidExecPath: binary, cwd: options.cwd, env: Object.fromEntries(Object.entries({ ...process.env, DROID_DISABLE_AUTO_UPDATE: 'true' }).filter((entry): entry is [string, string] => entry[1] !== undefined)) });
       await transport.connect();
-      return { transport, ...handlers, mcpServers: [server], abortSignal: context.signal };
+      return { transport, ...handlers, mcpServers: [mcpConfig], abortSignal: context.signal };
     };
     try {
       const config = await connect();

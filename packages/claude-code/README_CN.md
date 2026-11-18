@@ -192,8 +192,11 @@ nia-claude --help
 
 ### 2. 群聊工具、消息与原生提及
 
+Nia Teams 提供可用的协作工具，包括群聊管理、提醒和分享链接，运行时通过本机工具接口加载。
+
 - `send_message({ content })` 向当前群聊发布 Markdown 或 Rich HTML，常用于进度与提问；所有回复均需显式发送，轮次结束文本保持私有。
 - `chat_history({ limit?, offset? })` 分页读取历史；`limit` 默认 50、范围 1..100，`offset` 默认 0 且为非负整数。运行时注入当前 Nia session，模型不传目标群聊 ID。
+
 - 群聊工具限定在当前活跃轮次；中断或群聊会话切换后，旧工具请求不能继续向新的群聊会话发布。
 
 传入提示列出 `Members: Alice (<userId>), ...`，消息段列出发送者 ID、时间、消息 ID、回复关系与附件转写。通用消息也可表现为 `[chat:<chatId>] Alice (<userId>): ...`，结构化频道可携带 `senderId`；原始桥接帧字段为 `messages[].authorId`。回复中使用 `<mention userId="24-hex-id" />` 触发原生通知，ID 从发送者或成员列表取得。

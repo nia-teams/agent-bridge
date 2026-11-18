@@ -38,8 +38,8 @@ test('stdio initialize → thread/start → turn/start → private agentMessage 
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
   const entries = await log();
   assert.deepEqual(entries.slice(0, 2).map(m => m.method), ['initialize', 'initialized']);
-  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.2.0' });
-  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
+  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.3.0' });
+  assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length, 0);
   await host.message(message('second hold'));
   assert.equal((await log()).filter(m => m.method === 'thread/resume').length, 1);
   const saved = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'));
@@ -53,12 +53,12 @@ test('dynamic tool request results use contentItems/inputText; history is sessio
   await emit({ id: 'history', method: 'item/tool/call', params: { ...ids, callId: 'h1', namespace: null, tool: 'chat_history', arguments: { limit: 10, offset: 2 } } });
   const history = await waitResponse(log, 'history');
   assert.equal(history.result.success, true); assert.equal(history.result.contentItems[0].type, 'inputText');
-  assert.deepEqual(f.rpcs.find(r => r.method === 'group_chat.history').params, { sessionId, limit: 10, offset: 2 });
+  assert.deepEqual(f.rpcs.find(r => (r.method === 'tool.call' && r.params.name === 'chat_history')).params, { sessionId, toolCallId: 'h1', name: 'chat_history', arguments: { limit: 10, offset: 2 } });
   await emit({ id: 'send', method: 'item/tool/call', params: { ...ids, callId: 's1', namespace: null, tool: 'send_message', arguments: { content: 'Progress update' } } });
   assert.equal((await waitResponse(log, 'send')).result.success, true);
   await emit(complete(ids, [{ type: 'agentMessage', id: 'a', text: 'Internal status note' }]));
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
-  assert.deepEqual(f.rpcs.filter(r => r.method === 'group_chat.send_message').map(r => r.params.content), ['Progress update']);
+  assert.deepEqual(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).map(r => r.params.arguments.content), ['Progress update']);
   await emit({ id: 'stale', method: 'item/tool/call', params: { ...ids, callId: 'stale', tool: 'send_message', arguments: { content: 'No' } } });
   assert.equal((await waitResponse(log, 'stale')).result.success, false);
 });
@@ -93,7 +93,7 @@ test('thread.cancel interrupts active turn and declines/cancels pending card', a
   assert.deepEqual((await log()).find(m => m.method === 'turn/interrupt').params, ids);
   assert.ok(f.rpcs.some(r => r.method === 'card.cancel'));
   await emit(complete(ids, [{ type: 'agentMessage', id: 'stale', text: 'Do not publish' }]));
-  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
+  assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length, 0);
 });
 
 test('steer includes expectedTurnId; rejected steering queues next turn; resume failure starts replacement', async t => {
@@ -124,7 +124,7 @@ test('independent GroupChat threads, session rotation interrupts old turn, delta
   await emit({ method: 'item/agentMessage/delta', params: { ...ids, itemId: 'delta', delta: 'From delta' } });
   await emit(complete(ids));
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle' && r.params.deliveryId === rotated.deliveryId));
-  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
+  assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length, 0);
   await emit(complete({ threadId: 'codex-2', turnId: 'turn-2' }, [], { message: 'Model failed' }));
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.errorMessage === 'Model failed'));
 });
@@ -212,5 +212,34 @@ test('v2 contract, server reminder and upgrade safety start fresh instead of res
   assert.notEqual(entries.find(e => e.method === 'thread/resume').params.threadId, 'old-tools');
   assert.equal(entries.filter(e => e.method === 'turn/start')[1].params.input[0].text, reminder.prompt);
   assert.equal(idle()[1].params.deliveryId, reminder.deliveryId);
-  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
+  assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length, 0);
+});
+
+for (const provider of ['openai', 'deepseek']) test(`provider ${provider}: deferred handshake tool, direct string output, error and snapshot refresh`, async t => {
+  const { f, bridge, host, log, emit, active } = await setup(t);
+  await host.app.request('test/config', { provider });
+  const tool = { name: 'future_tool', description: 'Server addition', inputSchema: { type: 'object', properties: { value: { type: 'string' } } }, deferLoading: true };
+  bridge.getContract().tools.push(tool);
+  const ids = await active();
+  let entries = await log();
+  const dynamic = entries.find(m => m.method === 'thread/start').params.dynamicTools;
+  assert.equal(dynamic.at(-1).name, tool.name);
+  assert.deepEqual(dynamic.at(-1).inputSchema, tool.inputSchema);
+  assert.equal(dynamic.at(-1).deferLoading, provider === 'openai' ? true : undefined);
+  assert.ok(entries.findIndex(m => m.method === 'config/read') < entries.findIndex(m => m.method === 'thread/start'));
+  f.handleRpc = (frame, ws) => {
+    if (frame.method !== 'tool.call' || frame.params.name !== tool.name) return false;
+    ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: frame.requestId, ok: true, result: { content: '{"formatted":true}', isError: true } })); return true;
+  };
+  await emit({ id: 'future', method: 'item/tool/call', params: { ...ids, callId: 'future-id', tool: tool.name, arguments: { value: 'x' } } });
+  const result = (await waitResponse(log, 'future')).result;
+  assert.deepEqual(result, { contentItems: [{ type: 'inputText', text: '{"formatted":true}' }], success: false });
+  const rpc = f.rpcs.find(r => r.params.name === tool.name); assert.equal(rpc.params.toolCallId, 'future-id'); assert.deepEqual(rpc.params.arguments, { value: 'x' });
+  await emit(complete(ids)); await until(() => f.rpcs.some(r => r.params.state === 'idle'));
+  const stored = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'))[agentThreadId]; assert.match(stored.toolsFingerprint, /^[a-f0-9]{64}$/); assert.equal(stored.protocolVersion, 3);
+  bridge.getContract().tools.at(-1).description = 'Changed schema description';
+  const next = await active(); entries = await log();
+  assert.notEqual(next.threadId, ids.threadId);
+  assert.equal(entries.filter(m => m.method === 'thread/start').length, 2);
+  assert.equal(entries.filter(m => m.method === 'thread/resume').length, 0);
 });

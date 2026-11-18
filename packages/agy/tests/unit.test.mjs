@@ -25,14 +25,17 @@ test('invalid modes and nonpositive request timeouts fail before any process sta
 test('MCP loopback capabilities isolate turns, reject destination injection and revoke on finish', async t => {
   const relay = new McpRelay(); await relay.start(); t.after(() => relay.close());
   const calls = [], controller = new AbortController();
-  const context = { ...contract, signal:controller.signal, send: async content => calls.push(['a',content]), history:async (limit,offset) => ({limit,offset}) };
+  const context = { ...contract, signal:controller.signal, callTool: async (name, args) => {
+    if (name === 'send_message') { if (typeof args.content !== 'string' || !args.content.trim()) throw new Error('Empty message'); calls.push(['a', args.content]); return { content: '消息已发布到聊天' }; }
+    return { content: JSON.stringify({ limit: args.limit ?? 50, offset: args.offset ?? 0 }) };
+  } };
   const scope = relay.register(context); const env = Object.fromEntries(scope.env.map(e => [e.name,e.value]));
   const call = (name,args,token=env.NIA_AGY_MCP_TOKEN) => callRelay(name,args,env.NIA_AGY_MCP_URL,token);
-  assert.deepEqual(await call('send_message',{content:'hello'}),{ message: '消息已发布到聊天', published: true });
-  assert.deepEqual(await call('chat_history',{}),{limit:50,offset:0});
-  for (const [name,args] of [['unknown',{}],['send_message',{content:'x',group_chat_id:'other'}],['send_message',{content:' '}],['chat_history',{limit:101}],['chat_history',{offset:-1}]]) await assert.rejects(call(name,args));
+  assert.deepEqual(await call('send_message',{content:'hello'}),{ content: '消息已发布到聊天' });
+  assert.deepEqual(await call('chat_history',{}),{content:'{"limit":50,"offset":0}'});
+  for (const [name,args] of [['unknown',{}],['send_message',{content:' '}]]) await assert.rejects(call(name,args));
   await assert.rejects(call('chat_history',{},'wrong-token'));
-  const other = relay.register({...context,send:async content=>calls.push(['b',content])});
+  const other = relay.register({...context,callTool:async (name,args)=>{ calls.push(['b',args.content]); return {content:'sent'}; }});
   const otherEnv=Object.fromEntries(other.env.map(e=>[e.name,e.value]));
   await callRelay('send_message',{content:'other'},otherEnv.NIA_AGY_MCP_URL,otherEnv.NIA_AGY_MCP_TOKEN);
   assert.deepEqual(calls,[['a','hello'],['b','other']]);

@@ -1,7 +1,17 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { IdleSleepGuard, PublicationQueue, resolveThreadPrompt, type BridgeClient, type ThreadMessage, type CardAction, type ThreadCancel, type ActivityState } from '@nia-teams/agent-bridge-core';
 import { AppServer, type JsonObject, type ServerMessage } from './app-server.js';
 import { ThreadStore } from './threads.js';
+
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
+  if (value && typeof value === 'object') return '{' + Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => JSON.stringify(key) + ':' + canonicalJson(item)).join(',') + '}';
+  return JSON.stringify(value);
+}
+export function dynamicToolSpecs(tools: import('@nia-teams/agent-bridge-core').BridgeToolDefinition[], provider: string) {
+  return tools.map(({ name, description, inputSchema, deferLoading }) => ({ type: 'function', name, description, inputSchema, ...(provider === 'openai' && deferLoading ? { deferLoading: true } : {}) }));
+}
+export function toolsFingerprint(tools: unknown): string { return createHash('sha256').update(canonicalJson(tools)).digest('hex'); }
 
 export type CodexBridge = Pick<BridgeClient, 'getContract' | 'credentials' | 'rpc' | 'onReady' | 'onThreadMessage' | 'onCardAction' | 'onThreadCancel' | 'verifyCardApproval'>;
 export interface CodexOptions { configDir: string; cwd: string; model?: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'; fullAuto?: boolean; codexBin?: string; approvalTimeoutMs?: number; onError?: (error: Error) => void }
@@ -69,12 +79,17 @@ export class CodexHost {
   private async begin(thread: Thread, frame: ThreadMessage): Promise<void> {
     const contract = this.bridge.getContract();
     if (!contract) throw new Error('Bridge contract is missing');
-    const dynamicTools = contract.tools.map(t => ({ type: 'function', ...t }));
+    // Resolve the effective provider before thread/start: custom providers may not
+    // understand deferred dynamic tools (Codex #44984).
+    const config = await this.app.request('config/read', { includeLayers: false, cwd: this.options.cwd });
+    const provider = config.config?.model_provider ?? 'openai';
+    const dynamicTools = dynamicToolSpecs(contract.tools, provider);
+    const fingerprint = toolsFingerprint(dynamicTools);
     const common = { cwd: this.options.cwd, model: this.options.model, sandbox: this.options.sandbox ?? (this.options.fullAuto ? 'workspace-write' : 'read-only'), approvalPolicy: this.options.fullAuto ? 'never' : 'on-request', approvalsReviewer: 'user', developerInstructions: contract.systemPrompt };
     let result: JsonObject | undefined;
     const saved = this.store.get(frame.agentThreadId);
     if (saved && saved.groupChatId !== frame.groupChatId) throw new Error('Thread mapping belongs to a different GroupChat');
-    if (saved) {
+    if (saved && saved.toolsFingerprint === fingerprint) {
       try { result = await this.app.request('thread/resume', { ...common, threadId: saved.codexThreadId }); }
       catch (error) { this.report(error); }
     }
@@ -82,7 +97,7 @@ export class CodexHost {
     const codexId = result.thread?.id ?? result.threadId;
     if (typeof codexId !== 'string' || !codexId) throw new Error('Codex did not return a thread id');
     thread.codexId = codexId;
-    await this.store.set(frame.agentThreadId, { protocolVersion: 2, codexThreadId: codexId, groupChatId: frame.groupChatId, updatedAt: new Date().toISOString() });
+    await this.store.set(frame.agentThreadId, { protocolVersion: 3, toolsFingerprint: fingerprint, codexThreadId: codexId, groupChatId: frame.groupChatId, updatedAt: new Date().toISOString() });
     const turn: Turn = { controller: new AbortController() };
     thread.turn = turn; thread.items.clear(); this.sleepGuard();
     try {
@@ -145,17 +160,20 @@ export class CodexHost {
       const turn = thread.turn;
       const args = p.arguments;
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Expected object arguments');
-      let result: unknown;
+      const contract = this.bridge.getContract();
+      if (!contract?.tools.some(tool => tool.name === p.tool)) throw new Error('Unknown GroupChat tool');
+      let content: string; let isError = false;
+      const toolCallId = String(p.callId ?? randomUUID());
       if (p.tool === 'send_message') {
-        if (Object.keys(args).some(k => k !== 'content') || typeof args.content !== 'string' || !args.content.trim()) throw new Error('Expected nonempty content');
-        await this.publications.enqueue({ niaSessionId: thread.frame.sessionId, toolCallId: p.callId, content: args.content, activityAfter: { state: 'executing', label: 'Thinking in Codex…' }, shouldSyncActivity: () => thread.turn === turn, signal: turn.controller.signal });
-        result = { message: '消息已发布到聊天', published: true };
-      } else if (p.tool === 'chat_history') {
-        const limit = args.limit ?? 50, offset = args.offset ?? 0;
-        if (Object.keys(args).some(k => !['limit', 'offset'].includes(k)) || !Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) throw new Error('Invalid history range');
-        result = await this.bridge.rpc('group_chat.history', { sessionId: thread.frame.sessionId, limit, offset }, turn.controller.signal);
-      } else throw new Error('Unknown GroupChat tool');
-      this.app.respond(id, { contentItems: [{ type: 'inputText', text: JSON.stringify(result) }], success: true });
+        if (typeof args.content !== 'string' || !args.content.trim()) throw new Error('Expected nonempty content');
+        await this.publications.enqueue({ niaSessionId: thread.frame.sessionId, toolCallId, content: args.content, activityAfter: { state: 'executing', label: 'Thinking in Codex…' }, shouldSyncActivity: () => thread.turn === turn, signal: turn.controller.signal });
+        content = '消息已发布到聊天';
+      } else {
+        const result = await this.bridge.rpc('tool.call', { sessionId: thread.frame.sessionId, toolCallId, name: p.tool, arguments: args }, turn.controller.signal);
+        content = typeof result.content === 'string' ? result.content : JSON.stringify(result);
+        isError = Boolean(result.isError);
+      }
+      this.app.respond(id, { contentItems: [{ type: 'inputText', text: content }], success: !isError });
     } catch (error) { this.app.respond(id, { contentItems: [{ type: 'inputText', text: String(error) }], success: false }); }
   }
   private decision(method: string, accepted: boolean): JsonObject {

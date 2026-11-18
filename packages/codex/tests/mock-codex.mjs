@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline';
-const log = []; let n = 0, turn = 0, initialized = false, failResume = false, rejectSteer = false;
+const log = []; let n = 0, turn = 0, initialized = false, failResume = false, rejectSteer = false, provider = 'openai';
 const send = value => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\n');
 createInterface({ input: process.stdin }).on('line', line => {
   const m = JSON.parse(line);
@@ -10,9 +10,10 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (m.method === 'initialize') { if (!m.params.capabilities.experimentalApi) throw new Error('experimentalApi required'); reply({ userAgent: 'mock' }); }
   else if (m.method === 'initialized') { initialized = true; }
   else if (m.method === 'test/log') reply({ log });
-  else if (m.method === 'test/config') { failResume = m.params.failResume ?? failResume; rejectSteer = m.params.rejectSteer ?? rejectSteer; reply({}); }
+  else if (m.method === 'test/config') { provider = m.params.provider ?? provider; failResume = m.params.failResume ?? failResume; rejectSteer = m.params.rejectSteer ?? rejectSteer; reply({}); }
   else if (m.method === 'test/emit') { send(m.params.message); reply({}); }
   else if (!initialized) send({ id: m.id, error: { code: -1, message: 'Missing initialized' } });
+  else if (m.method === 'config/read') reply({ config: { model_provider: provider } });
   else if (m.method === 'thread/start') {
     if (!m.params.dynamicTools?.every(t => t.type === 'function' && t.inputSchema)) throw new Error('Incorrect dynamic tool shape');
     reply({ thread: { id: `codex-${++n}` } });

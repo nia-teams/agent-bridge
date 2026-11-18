@@ -11,3 +11,4 @@ export * from './process.js';
 export * from './session-host.js';
 export * from './sdk-turn.js';
 export * from './daemon.js';
+export * from './mcp.js';

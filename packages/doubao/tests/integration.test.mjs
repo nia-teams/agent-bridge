@@ -22,7 +22,7 @@ async function setup(t, extra = {}) {
   const records = async () => (await readFile(join(f.dir, 'driver.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).args);
   return { f, host, errors, records };
 }
-const sends = f => f.rpcs.filter(r => r.method === 'group_chat.send_message');
+const sends = f => f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message'));
 test('Doubao JSON receipt, clean assistant reply, durable conversation resume and startup only once', async t => {
   const { f, host, errors, records } = await setup(t);
   host.message(message('hello'));
@@ -31,7 +31,7 @@ test('Doubao JSON receipt, clean assistant reply, durable conversation resume an
   host.message(message('again'));
   await until(() => sends(f).length === 2, 'second reply', 10000);
   assert.equal(JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'))[agentThreadId].sessionId, first);
-  assert.deepEqual(sends(f).map(r => r.params.content), ['Doubao final reply', 'Doubao final reply']);
+  assert.deepEqual(sends(f).map(r => r.params.arguments.content), ['Doubao final reply', 'Doubao final reply']);
   assert.deepEqual(errors, []);
   const calls = await records();
   assert.equal(calls.filter(a => a.includes('status')).length, 1);
@@ -59,7 +59,7 @@ test('Doubao cancellation stops the pinned accepted remote run, suppresses stale
   const calls = await records();
   const stopped = calls.find(a => a.includes('stop'));
   assert.ok(stopped.includes(first.split(':')[1])); assert.ok(stopped.includes('--run'));
-  assert.equal(sends(f)[0].params.content, 'Doubao final reply');
+  assert.equal(sends(f)[0].params.arguments.content, 'Doubao final reply');
 });
 test('Doubao auth failures surface once without resend or GroupChat publication', async t => {
   const { f, host, errors, records } = await setup(t);

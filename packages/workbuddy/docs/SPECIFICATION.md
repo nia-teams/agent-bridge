@@ -5,7 +5,7 @@ Inspected npm `@tencent-ai/agent-sdk@0.3.300` and `@tencent-ai/codebuddy-code@2.
 - `query({ prompt, options })` is AsyncIterable of system/assistant/result messages. `session_id` identifies the durable runtime conversation; `resume` restores it. Success carries `type: "result", subtype: "success", result: string`; errors carry `is_error`/`errors`.
 - Executable override: `pathToCodebuddyCode`. There is no `pathToCodeBuddyExecutable` option. Options include `cwd`, `model`, `abortController`, `canUseTool`, `mcpServers`, `permissionMode`, `settingSources`, `env`.
 - SDK transport uses `--input-format=stream-json --output-format=stream-json --verbose`, `--resume`, `--setting-sources`, `--permission-mode`; it chooses Node for JS launchers and direct execution for `.exe`.
-- SDK initialize control request carries `sdkMcpServers` and `capabilities.askUserQuestion: true`. In-process tools use `createSdkMcpServer` and `tool` from the same SDK, with Zod schemas and MCP content results.
+- SDK initialize control request carries `sdkMcpServers` and `capabilities.askUserQuestion: true`. A low-level MCP `Server` preserves handshake JSON Schemas and returns string content without re-encoding.
 - CLI → SDK `control_request.request.subtype: "can_use_tool"` includes `tool_name`, `input`, `tool_use_id`. Callback is `(toolName, input, { signal, toolUseID, ... })`. SDK callbacks return `{ behavior: "allow", updatedInput }` or `{ behavior: "deny", message }`; SDK translates these to its own `{ allowed, ... }` wire response. Do not substitute Claude's control response shape.
 - Cancellation sets AbortController and calls query `interrupt()`; upstream returns a terminal result and cleans up the transport. Cancellation is cooperative with the selected CLI.
 - `AskUserQuestion` can surface through this callback. Answers are supplied in `updatedInput.answers`, keyed by question text.
@@ -20,7 +20,7 @@ a1bd88faf1f7c28d27d5975d2882ccd91d9b9206fdb0c5014d899519619a6aa9  tencent-ai-age
 
 TaskBar cards bind the full tool/input, active turn identity, and card ID through core `verifyCardApproval`, tool `workbuddy.approval`, server `agent-bridge`. UI clicks alone grant nothing. GroupChat tool calls are scoped by host context, not a model-supplied chat/session identifier.
 
-The runner appends `ready.systemPrompt` to SDK instructions and uses server tool descriptions for `send_message` / `chat_history`. SDK result text stays local; replies require explicit `send_message`. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
+The runner appends `ready.systemPrompt` to SDK instructions and registers all definitions from `ready.tools`. SDK result text stays local; replies require explicit `send_message`. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
 
 ## Desktop entrypoint interoperability
 
@@ -36,3 +36,7 @@ Desktop credential decryption invokes `Electron -e <inline-script> <auth-file-pa
 Incoming messages carry sender metadata, for example `[chat:<chatId>] Alice (<userId>): ...`, or `senderId` in structured channel payloads. This bridge's raw `thread.message` uses `messages[].authorId`; its formatted prompt lists `Alice (<userId>)` and member IDs. Use the received sender/member ID, not the display name.
 
 To notify a member with a native Nia Teams highlight, emit `<mention userId="<userId>" />` in the published reply. Plain `@Name` is text, not a real mention. Do not invent IDs; consult the member list/history if needed.
+
+## Native tool loading
+
+Core tools (`deferLoading` absent or false) use the `nia` SDK MCP server, which WorkBuddy always loads inline. Deferred tools use `nia_deferred`, an authenticated stateless HTTP MCP endpoint on an ephemeral `127.0.0.1` port. WorkBuddy indexes external MCP tools in its native ToolSearch when enabled and otherwise loads them normally. The SDK accepts `{ type: 'http', url, headers }` and connects using Streamable HTTP; the bridge closes its endpoint in `finally`. Both `mcp__nia__` and `mcp__nia_deferred__` prefixes bypass duplicate local approval. Nia Teams owns collaboration ACLs and confirmation cards. All calls use `context.callTool` and `tool.call`; only `send_message` enters the publication queue.

@@ -203,8 +203,11 @@ ACP replies contain `outcome: { outcome: "selected", optionId }`. Approval selec
 
 ### 2. GroupChat tools, messages, and native mentions
 
+Nia Teams supplies the available collaboration tools, including chat management, reminders, and shared links. The runtime exposes them through its native tool interface.
+
 - `send_message({ content })` publishes Markdown or Rich HTML to the current GroupChat for progress or questions. All replies require an explicit send; turn-end text stays private.
 - `chat_history({ limit?, offset? })` paginates history; `limit` defaults to 50 in 1..100, and `offset` defaults to 0 and must be non-negative. The host supplies the Nia session; the model does not choose a chat ID.
+
 - GroupChat tools belong to the active turn. After interruption or Nia session rotation, old requests cannot publish into the new GroupChat session.
 
 The bundled MCP service uses a temporary per-turn credential to access the current GroupChat; the credential expires when the turn ends. MCP helpers do not read the Nia Teams private key. See the [protocol specification](./docs/SPECIFICATION.md) for messages and request scope.

@@ -14,9 +14,9 @@ AI 指引：[skills/agent-bridge-core/SKILL.md](./skills/agent-bridge-core/SKILL
 
 ## 一、核心概念
 
-`BridgeClient` 通过 WebSocket 连接，使用 `protocolVersion: 2`。`getContract()` 返回 `ready.systemPrompt` 中的协作提示词与 `ready.tools` 中的工具定义（`name`、`description`、`inputSchema`）。用 `resolveThreadPrompt(frame)` 读取传入提示词。
+`BridgeClient` 通过 WebSocket 连接，使用 `protocolVersion: 3`。`getContract()` 返回 `ready.systemPrompt` 中的协作提示词与 `ready.tools` 中的工具定义（`name`、`description`、`inputSchema`、`deferLoading?`）。用 `resolveThreadPrompt(frame)` 读取传入提示词。
 
-`TurnRunner` 返回 `void`，通过 `context.send` 发布回复、`context.history` 读取历史。`SessionHost` 不发布返回文本。
+`TurnRunner` 返回 `void`，通过 `context.callTool` 调用握手下发的协作工具（`context.send` 与 `context.history` 为 `send_message` 与 `chat_history` 的便捷封装）。`SessionHost` 不发布返回文本。
 
 `pairHost` 保存主机 Ed25519 凭证，`BridgeClient` 通过 challenge/lease 建立 WebSocket，适配器处理群聊轮次，`PublicationQueue` 发布回复。模型、工具与本地权限由接入方运行时负责。
 
@@ -72,10 +72,11 @@ const bridge = new BridgeClient(await loadCredentials(configDir), {
 });
 bridge.onThreadMessage(async frame => {
   console.log(resolveThreadPrompt(frame));
-  await bridge.rpc('group_chat.send_message', {
+  await bridge.rpc('tool.call', {
     sessionId: frame.sessionId,
     toolCallId: frame.deliveryId,
-    content: 'Received',
+    name: 'send_message',
+    arguments: { content: 'Received' },
   });
   await bridge.rpc('thread.activity', {
     sessionId: frame.sessionId,
@@ -91,7 +92,7 @@ process.once('SIGTERM', () => bridge.close());
 await bridge.start();
 ```
 
-接入模型时，将 `resolveThreadPrompt(frame)` 与 `bridge.getContract()` 提供的契约交给模型。通过 `group_chat.send_message` 发布回复，轮次结束时通过 `thread.activity` 上报 `state: 'idle'` 和已处理的 `deliveryId`。
+接入模型时，将 `resolveThreadPrompt(frame)` 与 `bridge.getContract()` 提供的契约交给模型。通过 `tool.call` 发布回复，轮次结束时通过 `thread.activity` 上报 `state: 'idle'` 和已处理的 `deliveryId`。
 
 随包示例可运行：
 

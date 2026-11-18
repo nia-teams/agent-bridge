@@ -18,14 +18,14 @@ test('nia-claude start survives reconnect at final publication and serves the ne
   const f = await fixture(t); const daemon = await start(t, f);
   let dropped = false;
   f.handleRpc = (frame, ws) => {
-    if (frame.method === 'group_chat.send_message' && !dropped) { dropped = true; ws.terminate(); return true; }
+    if ((frame.method === 'tool.call' && frame.params.name === 'send_message') && !dropped) { dropped = true; ws.terminate(); return true; }
   };
   f.send(message('use tools'));
-  await until(() => f.connections === 2 && f.rpcs.filter(r => r.method === 'group_chat.send_message').length === 2, 'publication retry', 10000);
-  const sends = f.rpcs.filter(r => r.method === 'group_chat.send_message');
+  await until(() => f.connections === 2 && f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length === 2, 'publication retry', 10000);
+  const sends = f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message'));
   assert.equal(sends[0].params.toolCallId, sends[1].params.toolCallId);
   f.send(message('use tools again'));
-  await until(() => f.rpcs.filter(r => r.method === 'group_chat.send_message').length === 3, 'next turn', 10000);
+  await until(() => f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length === 3, 'next turn', 10000);
   assert.equal(daemon.child.exitCode, null);
   assert.doesNotMatch(daemon.stderr(), /CLAUDE_SDK_CAN_USE_TOOL_SHADOWED|unhandled|Agent Bridge is not ready/i);
   daemon.child.kill('SIGTERM');

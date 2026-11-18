@@ -164,7 +164,9 @@ nia-droid start [--cwd <dir>] [--model <model>] [--effort <level>]
 
 ![TaskBar 工具权限确认](./docs/assets/taskbar-approval.png)
 
-`send_message({ content })` 向当前群聊发布回复。`chat_history({ limit?, offset? })` 读取历史。工具 schema 接受可选的 limit（1–100）与 offset（非负整数）；省略时由 core 的 `context.history` 分别采用 50 和 0。两项工具限于当前轮次，不另弹 TaskBar 卡片。
+Nia Teams 提供可用的协作工具，包括群聊管理、提醒和分享链接，运行时通过本机工具接口加载。
+
+`send_message({ content })` 向当前群聊发布回复，`chat_history({ limit?, offset? })` 读取历史。工具参数与默认值由 Nia Teams 提供，协作工具限于当前轮次，权限由 Nia Teams 管理。
 
 AskUser 在群聊发布问题文本与选项标签。单题可回复选项标签或自定义文本；多题使用问题原文为键的 JSON，例如 `{"Choose a color":"Blue","Describe the task":"Review the patch"}`。选项标签仅供参考，不限制回答内容。桥接将每项回答作为字符串，连同原问题索引与文本返回：`{ answers: [{ index, question, answer }] }`。取消或拒绝提问返回 `{ cancelled: true, answers: [] }`。
 

@@ -23,7 +23,7 @@ test('package ships only the SDK daemon entrypoints and documentation', async ()
   for (const path of [...pkg.files, ...Object.values(pkg.bin), pkg.main, pkg.types]) await access(new URL(path, root));
   const entries = await readdir(root);
   assert.deepEqual(entries.filter(name => name.startsWith('.')).sort(), ['.gitignore', '.npmrc']);
-  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ['@anthropic-ai/claude-agent-sdk', '@nia-teams/agent-bridge-core', 'zod']);
+  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ['@anthropic-ai/claude-agent-sdk', '@nia-teams/agent-bridge-core']);
   const lock = await json('../../package-lock.json');
   assert.equal(lock.packages['packages/claude-code'].version, pkg.version);
   assert.deepEqual(lock.packages['packages/claude-code'].dependencies, pkg.dependencies);

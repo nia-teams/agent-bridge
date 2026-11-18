@@ -68,38 +68,47 @@ export class NiaTeamsHost {
       ctx.on('user-questions/request', (request, next) => this.question(request, next), { global: true, prepend: true }),
       ctx.on('session/event', (session, event) => this.event(session.id, event).catch(error => this.warn(error)), { global: true }),
     );
-    const host = this;
     ctx.inject(['tools'], toolCtx => {
       if (this.lifetime.signal.aborted) return;
-      for (const kind of ['send_message', 'chat_history'] as const) {
-        const remove = toolCtx.tools.register({
-          name: kind,
-          get description() { return host.bridge.getContract()?.tools.find(t => t.name === kind)?.description ?? kind; },
-          get parameters() { return host.bridge.getContract()?.tools.find(t => t.name === kind)?.inputSchema ?? { type: 'object' }; },
-          output: { schema: { type: 'object', additionalProperties: true }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
-          execute: async (args, exec) => {
-            const thread = exec.agent && this.threadForAgent(exec.agent);
-            if (!thread) throw new Error('This Agent does not own a Nia Teams GroupChat');
-            if (args === null || typeof args !== 'object' || Array.isArray(args)) throw new Error('Tool arguments must be an object');
-            const input = args as { content?: string; limit?: number; offset?: number };
-            if (kind === 'send_message') {
-              if (typeof input.content !== 'string' || !input.content.trim()) throw new Error('content must not be empty');
-              const result = await this.sendMessage(thread, input.content, exec.callId, exec.signal);
-              const output = this.outputs.get(exec.agent!.id);
-              if (output) output.toolSent = true;
-              return {
-                ...result,
-                message: '消息已发布到聊天', published: true,
-              };
-            }
-            const limit = input.limit ?? 50; const offset = input.offset ?? 0;
-            if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(offset) || offset < 0) throw new Error('History requires limit 1..100 and a non-negative offset');
-            return this.bridge.rpc('group_chat.history', { sessionId: thread.frame.sessionId, limit, offset }, exec.signal);
-          },
-        }, { when: ({ agent }) => this.ownsAgent(agent) });
-        // Also explicitly dispose on owner shutdown, not just on service-fiber removal.
-        this.disposers.push(remove); toolCtx.effect(() => remove);
-      }
+      const host = this;
+      const registered = new Map<string, () => void>();
+      const sync = () => {
+        const tools = this.bridge.getContract()?.tools ?? ['send_message', 'chat_history'].map(name => ({ name, description: name, inputSchema: { type: 'object' } }));
+        for (const [name, remove] of registered) if (!tools.some(tool => tool.name === name)) { remove(); registered.delete(name); }
+        for (const tool of tools) {
+          if (registered.has(tool.name)) continue;
+          const kind = tool.name;
+          const remove = toolCtx.tools.register({
+            name: kind,
+            get description() { return host.bridge.getContract()?.tools.find(t => t.name === kind)?.description ?? kind; },
+            get parameters() { return host.bridge.getContract()?.tools.find(t => t.name === kind)?.inputSchema ?? { type: 'object' }; },
+            output: { schema: {}, render: (_args, value) => [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }] },
+            execute: async (args, exec) => {
+              const thread = exec.agent && this.threadForAgent(exec.agent);
+              if (!thread) throw new Error('This Agent does not own a Nia Teams GroupChat');
+              if (args === null || typeof args !== 'object' || Array.isArray(args)) throw new Error('Tool arguments must be an object');
+              if (!(this.bridge.getContract()?.tools ?? tools).some(t => t.name === kind)) throw new Error('Unknown collaboration tool');
+              const input = args as Record<string, unknown>;
+              if (kind === 'send_message') {
+                if (typeof input.content !== 'string' || !input.content.trim()) throw new Error('content must not be empty');
+                await this.sendMessage(thread, input.content, exec.callId, exec.signal);
+                const output = this.outputs.get(exec.agent!.id);
+                if (output) output.toolSent = true;
+                return '消息已发布到聊天';
+              }
+              const result = await this.bridge.rpc('tool.call', { sessionId: thread.frame.sessionId, toolCallId: exec.callId ?? randomUUID(), name: kind, arguments: input }, this.signal(thread, exec.signal));
+              if (result.isError) throw new Error(String(result.content ?? 'Collaboration tool failed'));
+              return typeof result.content === 'string' ? result.content : JSON.stringify(result);
+            },
+          }, { when: ({ agent }) => this.ownsAgent(agent) });
+          registered.set(kind, remove);
+        }
+      };
+      sync();
+      const unregister = bridge.onReady(sync);
+      let disposed = false;
+      const dispose = () => { if (disposed) return; disposed = true; unregister(); for (const remove of registered.values()) remove(); registered.clear(); };
+      this.disposers.push(dispose); toolCtx.effect(() => dispose);
     });
     this.refresh = setInterval(() => {
       for (const thread of this.threads.values()) if (thread.activity.state !== 'idle') void this.activity(thread, thread.activity).catch(error => this.warn(error));
@@ -288,7 +297,7 @@ export class NiaTeamsHost {
     return this.bridge.rpc('thread.activity', { sessionId: thread.frame.sessionId, ...value });
   }
   private sendMessage(thread: Thread, content: string, toolCallId: string, signal?: AbortSignal) {
-    return this.bridge.rpc('group_chat.send_message', { sessionId: thread.frame.sessionId, content, toolCallId }, signal);
+    return this.publications.enqueue({ niaSessionId: thread.frame.sessionId, toolCallId, content, activityAfter: { state: 'executing', label: 'Thinking…' }, shouldSyncActivity: () => !this.signal(thread, signal).aborted, signal: this.signal(thread, signal) });
   }
   private async event(sessionId: string, event: SessionEvent): Promise<void> {
     if (this.lifetime.signal.aborted) return;
@@ -366,6 +375,7 @@ export class NiaTeamsHost {
     const thread = this.threadForAgent(request.agent);
     if (!thread) return next();
     if (this.signal(thread, request.signal).aborted) return 'cancelled';
+    if (this.bridge.getContract()?.tools.some(tool => tool.name === request.toolName)) return 'allowed-once';
     if (thread.allow.has(request.toolName)) return 'allowed-once';
     const result = await this.card(thread, 'dsh.approval', { agentThreadId: thread.frame.agentThreadId, toolName: request.toolName, callId: request.callId ?? '', reason: request.reason ?? '' },
       { title: `Allow ${request.toolName}?`, subtitle: request.reason || 'This Agent needs permission to continue.', callId: request.callId }, request.signal);

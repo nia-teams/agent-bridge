@@ -14,9 +14,9 @@ For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONN
 
 ## Core Concepts
 
-`BridgeClient` connects over WebSocket with `protocolVersion: 2`. Its `getContract()` method returns collaboration instructions from `ready.systemPrompt` and tool definitions (`name`, `description`, `inputSchema`) from `ready.tools`. Use `resolveThreadPrompt(frame)` for incoming prompts.
+`BridgeClient` connects over WebSocket with `protocolVersion: 3`. Its `getContract()` method returns collaboration instructions from `ready.systemPrompt` and tool definitions (`name`, `description`, `inputSchema`, `deferLoading?`) from `ready.tools`. Use `resolveThreadPrompt(frame)` for incoming prompts.
 
-A `TurnRunner` returns `void`, publishes through `context.send`, and reads history through `context.history`. `SessionHost` does not publish return text.
+A `TurnRunner` returns `void` and invokes handshake-advertised collaboration tools through `context.callTool` (`context.send` and `context.history` remain convenience wrappers for `send_message` and `chat_history`). `SessionHost` does not publish return text.
 
 `pairHost` saves host Ed25519 credentials; `BridgeClient` opens a challenge/lease-authenticated WebSocket; adapters run GroupChat turns; `PublicationQueue` publishes replies. Consumer runtimes own models, tools, and local permissions.
 
@@ -76,10 +76,11 @@ const bridge = new BridgeClient(await loadCredentials(configDir), {
 });
 bridge.onThreadMessage(async frame => {
   console.log(resolveThreadPrompt(frame));
-  await bridge.rpc('group_chat.send_message', {
+  await bridge.rpc('tool.call', {
     sessionId: frame.sessionId,
     toolCallId: frame.deliveryId,
-    content: 'Received',
+    name: 'send_message',
+    arguments: { content: 'Received' },
   });
   await bridge.rpc('thread.activity', {
     sessionId: frame.sessionId,
@@ -95,7 +96,7 @@ process.once('SIGTERM', () => bridge.close());
 await bridge.start();
 ```
 
-For a model-backed runtime, pass `resolveThreadPrompt(frame)` and `bridge.getContract()` to the model. Publish replies through `group_chat.send_message` and report turn completion through `thread.activity` with `state: 'idle'` and the processed `deliveryId`.
+For a model-backed runtime, pass `resolveThreadPrompt(frame)` and `bridge.getContract()` to the model. Publish replies through `tool.call` and report turn completion through `thread.activity` with `state: 'idle'` and the processed `deliveryId`.
 
 Run the packaged examples:
 

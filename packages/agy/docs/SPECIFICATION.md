@@ -1,8 +1,8 @@
 # Antigravity ACP adapter contract
 
-Protocol evidence: user-supplied macOS captures from `agy 1.4.10` / `Antigravity ACP Server 1.5.4`. Agent Bridge transport, credential signing, and RS256 confirmation claims follow [core Agent Bridge v2](../../core/docs/SPECIFICATION.md). Example identifiers below are synthetic.
+Protocol evidence: user-supplied macOS captures from `agy 1.4.10` / `Antigravity ACP Server 1.5.4`. Agent Bridge transport, credential signing, and RS256 confirmation claims follow [core Agent Bridge v3](../../core/docs/SPECIFICATION.md). Example identifiers below are synthetic.
 
-Agent Bridge WebSocket uses `protocolVersion: 2`; ACP initialization uses `protocolVersion: 1`. The adapter supplies server instructions on session creation and resume, and server tool definitions to the scoped MCP relay. Core mappings store `v2:<ACP session ID>`; ACP requests use the unprefixed ID. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
+Agent Bridge WebSocket uses `protocolVersion: 3`; ACP initialization uses `protocolVersion: 1`. The adapter supplies server instructions on session creation and resume, and server tool definitions to the scoped MCP relay. Core mappings store `v2:<ACP session ID>` (the adapter's explicit-tool ACP session namespace, avoiding unprefixed v1 legacy mappings); ACP requests use the unprefixed ID. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
 
 ## 1. Process and JSON-RPC framing
 
@@ -19,7 +19,7 @@ Client control requests default to 30 seconds; prompts default to 600 seconds. C
 ## 2. Initialization
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"nia-agy","version":"0.2.0"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"nia-agy","version":"0.3.0"}}}
 ```
 
 The response must contain `result.protocolVersion === 1`. `agentCapabilities`, `agentInfo`, and `authMethods` describe upstream capabilities; authentication remains local to agy. No Codex-style `initialized` notification is added.
@@ -107,14 +107,9 @@ Use `allow_once` on verified approval and `reject_once` on denial. For entries w
 
 ## 6. Scoped MCP transport
 
-The bundled `dist/mcp-server.js` uses `@modelcontextprotocol/sdk` stdio transport with two tools:
+The bundled `dist/mcp-server.js` uses `@modelcontextprotocol/sdk` stdio transport. It lists every `ready.tools` definition with `name`, `description`, and raw `inputSchema`; `deferLoading` is stripped because Antigravity has no native ToolSearch. Calls verify membership in the turn contract, delegate to `context.callTool` and `tool.call`, and return the content string once with `isError` preserved. Nia Teams MCP names (`mcp__nia-teams__`, `nia-teams___`, or server name `nia-teams`) bypass duplicate local permission cards.
 
-| Tool | Arguments | Host operation |
-| --- | --- | --- |
-| `send_message` | `{ content: nonblank string }` | `context.send(content)` |
-| `chat_history` | `{ limit?: 1..100, offset?: integer >= 0 }` | `context.history(limit, offset)`; defaults 50 / 0 |
-
-The daemon binds one ephemeral HTTP relay to `127.0.0.1`. Each turn receives a random 256-bit capability; its helper only accesses that host-supplied context, never a model-selected chat/session. Revocation occurs when the turn finishes or aborts. Unknown tools, extra destination fields, invalid pagination, wrong tokens, and stale/aborted contexts fail. Bridge credentials and private keys are not sent to helpers. The URL and token are local process environment, not persistent state. Helpers restrict endpoints to loopback HTTP `/tool` and reject redirects.
+The daemon binds one ephemeral HTTP relay to `127.0.0.1`. Each turn receives a random 256-bit capability; its helper only accesses that host-supplied context, never a model-selected chat/session. Revocation occurs when the turn finishes or aborts. Unknown tools, wrong tokens, and stale/aborted contexts fail locally; argument validation belongs to Nia Teams. Bridge credentials and private keys are not sent to helpers. The URL and token are local process environment, not persistent state. Helpers restrict endpoints to loopback HTTP `/tool` and reject redirects.
 
 ## 7. Cancellation and process ownership
 

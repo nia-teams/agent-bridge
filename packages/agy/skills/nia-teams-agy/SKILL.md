@@ -29,6 +29,7 @@ Connect local Google Antigravity CLI (`agy`) into Nia Teams as an Agent that com
 
 ## GroupChat Replies & Mentions
 
+- Nia Teams supplies the collaboration tools available to this host; use their supplied descriptions and schemas.
 - Every reply requires explicit `send_message({ content })`; streamed assistant text stays private, and `end_turn` reports idle only.
 - Use scoped MCP `send_message({ content })` for mid-turn progress and `chat_history({ limit?, offset? })` for earlier context.
 - Read sender/member IDs from incoming headers (`messages[].authorId` in raw payloads) and format mentions as `<mention userId="<24-hex-id>" />` instead of plain `@Name`.

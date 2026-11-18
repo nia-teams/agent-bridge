@@ -23,7 +23,7 @@ export async function until(predicate, label = 'condition', timeout = 4000) {
 }
 export function message(content = 'Hello', deliveryId = randomUUID()) {
   const id = randomUUID();
-  return { type: 'thread.message', protocolVersion: 2, deliveryId, groupChatId, sessionId, agentThreadId, reason: 'message',
+  return { type: 'thread.message', protocolVersion: 3, deliveryId, groupChatId, sessionId, agentThreadId, reason: 'message',
     groupChat: { title: 'Project chat', url: 'https://nia-teams.com/chat/example', members: [{ kind: 'human', id: userId, name: 'Alex' }] },
     invokedBy: { userId, userName: 'Alex' }, triggerMessageId: id,
     messages: [{ id, kind: 'human', authorId: userId, authorName: 'Alex', content, createdAt: new Date().toISOString() }],
@@ -100,7 +100,7 @@ export async function fixture(t) {
     const token = await signTestConfirmationToken(fixture.provider, { server: 'agent-bridge', tool: card.params.verifyToolName,
       arguments: tamper ? { ...card.params.verifyArguments, altered: true } : card.params.verifyArguments, cardId: card.params.cardId, claims,
     });
-    fixture.send({ type: 'card.action', protocolVersion: 2, deliveryId: randomUUID(), sessionId: card.params.sessionId, groupChatId, agentThreadId,
+    fixture.send({ type: 'card.action', protocolVersion: 3, deliveryId: randomUUID(), sessionId: card.params.sessionId, groupChatId, agentThreadId,
       cardId: card.params.cardId, decision, clickedBy: { userId, name: 'Alex', teamRole: 'member' }, _meta: { 'nia/confirmationToken': token } });
   };
   wss.on('connection', ws => {
@@ -109,10 +109,10 @@ export async function fixture(t) {
     ws.on('message', async bytes => {
       const frame = JSON.parse(bytes.toString()); fixture.frames.push(frame);
       if (frame.type === 'hello') {
-        assert.equal(frame.protocolVersion, 2); assert.equal(frame.teamId, teamId); assert.ok(leases.delete(frame.lease));
+        assert.equal(frame.protocolVersion, 3); assert.equal(frame.teamId, teamId); assert.ok(leases.delete(frame.lease));
         fixture.socket = ws;
         const ready = () => {
-          ws.send(JSON.stringify({ type: 'ready', ...contract, protocolVersion: 2, connectionGeneration: randomUUID(), agent: { teamId, slug: 'helper', name: 'Helper' }, issuer: fixture.url }));
+          ws.send(JSON.stringify({ type: 'ready', ...contract, protocolVersion: 3, connectionGeneration: randomUUID(), agent: { teamId, slug: 'helper', name: 'Helper' }, issuer: fixture.url, ...fixture.readyOverrides }));
           fixture.onReady?.(ws);
         };
         if (fixture.holdReady) fixture.waitingReady = ready; else ready();
@@ -120,10 +120,10 @@ export async function fixture(t) {
         fixture.rpcs.push(frame);
         if (fixture.handleRpc?.(frame, ws)) return;
         if (fixture.holdRpc.has(frame.method)) return;
-        const result = frame.method === 'group_chat.history' ? { text: 'Earlier chat' } : frame.method === 'card.upsert' ? { cardId: frame.params.cardId, status: 'pending' } : { ok: true, published: true };
-        ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 2, requestId: frame.requestId, ok: true, result }));
+        const result = frame.method === 'group_chat.history' ? { text: 'Earlier chat' } : (frame.method === 'tool.call' && frame.params.name === 'chat_history') ? { content: 'Earlier chat' } : frame.method === 'card.upsert' ? { cardId: frame.params.cardId, status: 'pending' } : { ok: true, published: true };
+        ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: frame.requestId, ok: true, result }));
         fixture.onRpc?.(frame);
-      } else if (frame.type === 'heartbeat') ws.send(JSON.stringify({ type: 'heartbeat', protocolVersion: 2, at: Date.now() }));
+      } else if (frame.type === 'heartbeat') ws.send(JSON.stringify({ type: 'heartbeat', protocolVersion: 3, at: Date.now() }));
     });
   });
   t.after(async () => {

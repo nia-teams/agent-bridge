@@ -7,13 +7,15 @@ import { IdleSleepGuard } from './process.js';
 import { resolveThreadPrompt } from './format.js';
 export type SessionBridge = Pick<BridgeClient, 'getContract' | 'credentials' | 'rpc' | 'onReady' | 'onThreadMessage' | 'onThreadCancel' | 'onCardAction' | 'verifyCardApproval'>;
 export interface PermissionDecision { behavior: 'allow' | 'deny'; updatedInput?: Record<string, unknown>; message?: string }
+export interface ToolCallResult { content: string; isError?: boolean }
 export interface TurnContext {
+  callTool(name: string, args: Record<string, unknown>, toolCallId?: string): Promise<ToolCallResult>;
   systemPrompt: string; tools: BridgeToolDefinition[]; deliveryId: string;
   prompt: string; resume?: string; signal: AbortSignal; turnId: string;
   session(id: string): Promise<void>;
   activity(state: ActivityState, label?: string): Promise<void>;
   send(content: string, toolCallId?: string): Promise<void>;
-  history(limit?: number, offset?: number): Promise<Record<string, unknown>>;
+  history(limit?: number, offset?: number): Promise<ToolCallResult>;
   permission(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<PermissionDecision>;
 }
 export type TurnResult = void;
@@ -88,18 +90,23 @@ export class SessionHost {
         await this.activity(thread, frame, active, 'executing', `Thinking in ${this.options.runtime}…`);
         const contract = this.bridge.getContract();
         if (!contract) throw new Error('Bridge contract is missing');
+        const callTool = async (name: string, args: Record<string, unknown>, toolCallId: string = randomUUID()): Promise<ToolCallResult> => {
+          signal.throwIfAborted();
+          if (!contract.tools.some(tool => tool.name === name)) throw new Error('Unknown collaboration tool');
+          if (name === 'send_message') {
+            if (typeof args.content !== 'string' || !args.content.trim()) throw new Error('Message must be nonempty');
+            await this.publications.enqueue({ niaSessionId: frame.sessionId, toolCallId: `tool:${active.id}:${toolCallId}`, content: args.content, activityAfter: { state: 'executing', label: `Thinking in ${this.options.runtime}…` }, shouldSyncActivity: () => thread.active === active && thread.frame.sessionId === frame.sessionId, signal });
+            return { content: '消息已发布到聊天' };
+          }
+          const result = await this.bridge.rpc('tool.call', { sessionId: frame.sessionId, toolCallId, name, arguments: args }, signal);
+          return { content: typeof result.content === 'string' ? result.content : JSON.stringify(result), ...(result.isError ? { isError: true } : {}) };
+        };
         await this.runner({ ...contract, deliveryId: frame.deliveryId, prompt: resolveThreadPrompt(frame), resume: saved?.sessionId, signal, turnId: active.id,
           session: async id => { signal.throwIfAborted(); if (!id) throw new Error('Empty runtime session id'); await this.store.set(frame.agentThreadId, { sessionId: id, groupChatId: frame.groupChatId, updatedAt: new Date().toISOString() }); },
           activity: (state, label) => this.activity(thread, frame, active, state, label),
-          send: async (content, toolCallId = randomUUID()) => {
-            signal.throwIfAborted(); if (typeof content !== 'string' || !content.trim()) throw new Error('Message must be nonempty');
-            await this.publications.enqueue({ niaSessionId: frame.sessionId, toolCallId: `tool:${active.id}:${toolCallId}`, content, activityAfter: { state: 'executing', label: `Thinking in ${this.options.runtime}…` }, shouldSyncActivity: () => thread.active === active && thread.frame.sessionId === frame.sessionId, signal });
-          },
-          history: async (limit = 50, offset = 0) => {
-            signal.throwIfAborted();
-            if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) throw new Error('Invalid history range');
-            return this.bridge.rpc('group_chat.history', { sessionId: frame.sessionId, limit, offset }, signal);
-          },
+          callTool,
+          send: async (content, toolCallId) => { const result = await callTool('send_message', { content }, toolCallId); if (result.isError) throw new Error(result.content); },
+          history: async (limit = 50, offset = 0) => callTool('chat_history', { limit, offset }),
           permission: (tool, input, toolSignal) => this.permission(thread, frame, active, tool, input, toolSignal),
         });
         signal.throwIfAborted();

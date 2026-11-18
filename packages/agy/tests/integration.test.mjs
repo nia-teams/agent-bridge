@@ -7,7 +7,7 @@ import { createAgyRunner } from '../dist/index.js';
 import { fixture, message, until, agentThreadId, teamId, contract } from '../../core/tests/helpers.mjs';
 const binary = fileURLToPath(new URL('./mock-agy.mjs', import.meta.url));
 const idles = f => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle');
-const sends = f => f.rpcs.filter(r => r.method === 'group_chat.send_message');
+const sends = f => f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message'));
 async function setup(t, options = {}) {
   const cleanups = [];
   const f = await fixture({ after: fn => cleanups.push(fn) }), errors = [];
@@ -22,7 +22,7 @@ async function setup(t, options = {}) {
   t.after(async () => { bridge.close(); await host.close(); await runner.close(); for (const cleanup of cleanups) await cleanup(); });
   const events = async () => (await readFile(log, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   const idle = () => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle');
-  return { f, host, runner, errors, events, idle };
+  return { f, bridge, host, runner, errors, events, idle };
 }
 test('ACP initialize, private streaming text/thoughts, durable resume and one persistent child', async t => {
   const { f, host, events, errors } = await setup(t);
@@ -31,7 +31,7 @@ test('ACP initialize, private streaming text/thoughts, durable resume and one pe
   const e = await events();
   assert.equal(e.filter(e => e.kind === 'spawn').length, 1);
   const init = e.find(e => e.method === 'initialize');
-  assert.deepEqual(init.params, { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.2.0' } });
+  assert.deepEqual(init.params, { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.0' } });
   const fresh = e.find(e => e.method === 'session/new'); assert.equal(fresh.params.systemPromptAppend, contract.systemPrompt);
   assert.ok(fresh.params.mcpServers[0].env.every(e => typeof e.name === 'string'));
   const saved = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'));
@@ -163,8 +163,8 @@ test('real stdio MCP helper routes send/history and suppresses duplicate final t
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
   host.message(message('second-tools')); await until(() => sends(f).length === 2, 'resumed MCP send', 10000);
   await until(() => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle').length === 2, 'both MCP turns completed', 10000);
-  assert.deepEqual(sends(f).map(r => r.params.content), ['ACP interim','Second scoped update']);
-  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.history').length, 2);
+  assert.deepEqual(sends(f).map(r => r.params.arguments.content), ['ACP interim','Second scoped update']);
+  assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'chat_history')).length, 2);
   assert.equal((await events()).filter(e => e.kind === 'send' && !e.result.isError).length, 2);
   assert.deepEqual(errors, []);
 });
@@ -191,5 +191,23 @@ test('legacy ACP mapping starts v2 session; resumed reminder receives latest ser
   assert.equal(e.filter(e => e.method === 'session/prompt')[1].params.prompt[0].text, reminder.prompt);
   assert.deepEqual(e.find(e => e.kind === 'tools').result.tools, contract.tools);
   assert.equal(idles(f)[1].params.deliveryId, reminder.deliveryId);
-  assert.deepEqual(sends(f).map(r => r.params.content), ['ACP interim']);
+  assert.deepEqual(sends(f).map(r => r.params.arguments.content), ['ACP interim']);
+});
+
+test('AGY registers every server tool normally and preserves formatted content without loading hints', async t => {
+  const { f, bridge, host, events, errors } = await setup(t);
+  const tool = { name: 'future_tool', description: 'Future AGY tool', inputSchema: { type: 'object', properties: { value: { enum: ['new'] } } }, deferLoading: true };
+  bridge.getContract().tools.push(tool);
+  f.handleRpc = (frame, ws) => {
+    if (frame.method !== 'tool.call' || frame.params.name !== tool.name) return false;
+    ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: frame.requestId, ok: true, result: { content: '{"future":true}', isError: true } })); return true;
+  };
+  host.message(message('future tools')); await until(() => idles(f).length === 1);
+  const records = await events(), listed = records.find(e => e.kind === 'tools').result.tools.find(t => t.name === tool.name);
+  assert.deepEqual(listed.inputSchema, tool.inputSchema); assert.equal(listed.deferLoading, undefined);
+  assert.deepEqual(records.find(e => e.kind === 'future').result, { content: [{ type: 'text', text: '{"future":true}' }], isError: true });
+  assert.deepEqual(f.rpcs.find(r => r.params.name === tool.name).params.arguments, { value: 'new' });
+  host.message(message('nia permission')); await until(() => idles(f).length === 2);
+  assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
+  assert.deepEqual(errors, []);
 });

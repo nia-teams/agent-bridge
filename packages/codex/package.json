@@ -1,6 +1,6 @@
 {
   "name": "@nia-teams/codex-bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -33,7 +33,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@nia-teams/agent-bridge-core": "^0.2.0"
+    "@nia-teams/agent-bridge-core": "^0.3.0"
   },
   "author": "Nia Teams",
   "homepage": "https://nia-teams.com",

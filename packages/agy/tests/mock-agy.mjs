@@ -20,7 +20,7 @@ async function request(m) {
     case 'initialize':
       if (process.env.AGY_TEST_INIT === 'hang') return;
       if (process.env.AGY_TEST_INIT === 'malformed') { process.stdout.write('not json\n'); return; }
-      if (process.env.AGY_TEST_INIT === 'wrong-version') return result(m.id, { protocolVersion: 2 });
+      if (process.env.AGY_TEST_INIT === 'wrong-version') return result(m.id, { protocolVersion: 3 });
       return result(m.id, { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: true } }, agentInfo: { name: 'mock-acp' }, authMethods: [] });
     case 'session/new': {
       if (typeof p.systemPromptAppend !== 'string' || !p.systemPromptAppend) throw new Error('Missing server system prompt');
@@ -51,7 +51,7 @@ async function request(m) {
         const id = text.includes('numeric permission') ? 1 : String(++serverId);
         pending.set(id, { sid, id: m.id });
         const options = text.includes('no once permission') ? [{ optionId: 'always', kind: 'allow_always', name: 'Always' }] : [{ optionId: 'allow', kind: 'allow_once', name: 'Allow' }, { optionId: 'deny', kind: 'reject_once', name: 'Deny' }];
-        send({ id, method: 'session/request_permission', params: { sessionId: sid, toolCall: { sessionUpdate: 'tool_call', toolCallId: 'call-'+randomUUID(), name: 'run_command', args: { CommandLine: 'echo HELLO_AGY' }, rawInput: { CommandLine: 'echo HELLO_AGY' }, status: 'pending', kind: 'execute', title: 'echo HELLO_AGY' }, options } });
+        send({ id, method: 'session/request_permission', params: { sessionId: sid, toolCall: { sessionUpdate: 'tool_call', toolCallId: 'call-'+randomUUID(), name: text.includes('nia permission') ? 'mcp__nia-teams__future_tool' : 'run_command', args: { CommandLine: 'echo HELLO_AGY' }, rawInput: { CommandLine: 'echo HELLO_AGY' }, status: 'pending', kind: 'execute', title: 'echo HELLO_AGY' }, options } });
         return;
       }
       if (text.includes('tools')) {
@@ -62,6 +62,7 @@ async function request(m) {
         try {
           await client.connect(transport);
           log({ kind: 'tools', result: await client.listTools() });
+          if (text.includes('future tools')) log({ kind: 'future', result: await client.callTool({ name: 'future_tool', arguments: { value: 'new' } }) });
           log({ kind: 'history', result: await client.callTool({ name: 'chat_history', arguments: { limit: 3 } }) });
           const content = text.includes('second-tools') ? 'Second scoped update' : 'ACP interim';
           log({ kind: 'send', result: await client.callTool({ name: 'send_message', arguments: { content } }) });

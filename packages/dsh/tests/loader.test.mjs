@@ -23,8 +23,9 @@ test('real cordis.yml Loader sees named exports/inject, publishes a user-visible
   await ctx.loader.await();
   await until(() => f.socket, 'plugin handshake through Loader');
   f.send(message());
-  await until(() => f.rpcs.some(rpc => rpc.method === 'group_chat.send_message'), 'automatic GroupChat reply');
-  assert.equal(f.rpcs.find(rpc => rpc.method === 'group_chat.send_message').params.content, 'Loaded Agent says hello');
+  await until(() => f.rpcs.some(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')), 'automatic GroupChat reply');
+  assert.equal(f.rpcs.find(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')).params.arguments.content, 'Loaded Agent says hello');
+  await until(() => f.rpcs.some(rpc => rpc.method === 'thread.activity' && rpc.params.state === 'idle'), 'turn completion before unloading');
   const probe = ctx.get('testProbe'); assert.equal(probe.follows.length, 1); assert.equal(probe.tools.size, 2);
   const include = ctx.loader.resolve(includeId).subtree;
   const entry = include.resolve('nia-teams');

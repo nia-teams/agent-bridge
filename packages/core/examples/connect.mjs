@@ -6,10 +6,11 @@ const bridge = new BridgeClient(await loadCredentials(configDir), {
 });
 bridge.onThreadMessage(async frame => {
   console.log(resolveThreadPrompt(frame));
-  await bridge.rpc('group_chat.send_message', {
+  await bridge.rpc('tool.call', {
     sessionId: frame.sessionId,
     toolCallId: frame.deliveryId,
-    content: 'Received',
+    name: 'send_message',
+    arguments: { content: 'Received' },
   });
   await bridge.rpc('thread.activity', {
     sessionId: frame.sessionId,

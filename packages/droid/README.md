@@ -164,7 +164,9 @@ The package root exports `createDroidRunner(options: DroidOptions): TurnRunner`,
 
 ![TaskBar approval](./docs/assets/taskbar-approval.png)
 
-`send_message({ content })` publishes to the active GroupChat. `chat_history({ limit?, offset? })` reads history. Its schema accepts optional limit (1–100) and offset (nonnegative); core `context.history` supplies 50 and 0 when omitted. Both tools are scoped to the current turn and need no separate TaskBar card.
+Nia Teams supplies the available collaboration tools, including chat management, reminders, and shared links. The runtime exposes them through its native tool interface.
+
+`send_message({ content })` publishes to the active GroupChat; `chat_history({ limit?, offset? })` reads history. Tool schemas and defaults come from Nia Teams. Collaboration tools are scoped to the current turn; Nia Teams manages their permissions.
 
 AskUser publishes the question text and option labels to GroupChat. For one question, reply with an option label or custom free text. For multiple questions, reply with JSON keyed by the exact question text, for example `{"Choose a color":"Blue","Describe the task":"Review the patch"}`. Option labels are suggestions, not enforced choices. The bridge returns each answer as a string with the original question index and text: `{ answers: [{ index, question, answer }] }`. A cancelled or denied question returns `{ cancelled: true, answers: [] }`.
 

@@ -156,7 +156,7 @@ test('protocol documentation distinguishes ACP initialization from Agent Bridge 
   }
   const specification = await read('packages/agy/docs/SPECIFICATION.md');
   assert.match(specification, /ACP[^\n]*protocolVersion: 1/);
-  assert.match(specification, /WebSocket[^\n]*protocolVersion: 2/);
+  assert.match(specification, /WebSocket[^\n]*protocolVersion: 3/);
   assert.match(specification, /"method":"initialize","params":\{"protocolVersion":1/);
 });
 
@@ -185,7 +185,7 @@ test('user-facing adapter guides omit internal wire fields', async () => {
   const guides = ['README.md', 'README_CN.md', ...adapters.flatMap(name =>
     [`packages/${name}/README.md`, `packages/${name}/README_CN.md`])];
   for (const path of guides) {
-    assert.doesNotMatch(await read(path), /ready\.systemPrompt|ready\.tools|protocolVersion:\s*2|deliveryId|silent-turn|`v2:/, path);
+    assert.doesNotMatch(await read(path), /ready\.systemPrompt|ready\.tools|protocolVersion:\s*[23]|deferLoading|deliveryId|silent-turn|`v2:/, path);
   }
 });
 
@@ -201,4 +201,18 @@ test('Droid Skill uses the canonical adapter directory in source, guides, and pa
     assert.ok(guide.includes(`./${skill}`), path);
     assert.ok(guide.includes(`node_modules/${manifest.name}/${skill}`), path);
   }
+});
+
+
+test('v3 specifications describe dynamic tools and the unified tool RPC', async () => {
+  for (const path of ['docs/SPECIFICATION.md', 'packages/core/docs/SPECIFICATION.md', ...adapters.map(name => `packages/${name}/docs/SPECIFICATION.md`)]) {
+    assert.match(await read(path), /tool\.call/, path);
+  }
+  const core = await read('packages/core/docs/SPECIFICATION.md');
+  assert.match(core, /protocolVersion: 3/);
+  assert.match(core, /deferLoading\?: boolean/);
+  assert.match(core, /content: string, isError\?: boolean/);
+  assert.match(await read('packages/claude-code/docs/SPECIFICATION.md'), /anthropic\/alwaysLoad/);
+  assert.match(await read('packages/codex/docs/SPECIFICATION.md'), /config\/read/);
+  assert.match(await read('packages/workbuddy/docs/SPECIFICATION.md'), /nia_deferred/);
 });

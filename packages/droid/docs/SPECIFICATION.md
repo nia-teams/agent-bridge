@@ -28,7 +28,7 @@ The integration mock speaks these native messages to the real Factory SDK. It al
 
 ## Permissions and questions
 
-`permissionHandler(params)` receives `toolUses`, each containing `toolUse`, `confirmationType`, and `details`, plus offered options. The bridge bypasses separate TaskBar cards only for its two `nia` tools. Other requests call `context.permission('droid:<tool>', input, signal)`; input contains the original tool arguments under `input`, plus confirmation type and details. Prefixing names keeps runtime tools separate from core's `AskUserQuestion` dispatch. A batch proceeds only when every non-collaboration request is allowed. Responses select `ToolConfirmationOutcome.ProceedOnce` (`proceed_once`) or `Cancel` (`cancel`), never a persistent allow option.
+`permissionHandler(params)` receives `toolUses`, each containing `toolUse`, `confirmationType`, and `details`, plus offered options. The bridge bypasses separate TaskBar cards for all tools in namespace `nia` or with names prefixed `nia___` / `mcp__nia__`. Other requests call `context.permission('droid:<tool>', input, signal)`; input contains the original tool arguments under `input`, plus confirmation type and details. Prefixing names keeps runtime tools separate from core's `AskUserQuestion` dispatch. A batch proceeds only when every non-collaboration request is allowed. Responses select `ToolConfirmationOutcome.ProceedOnce` (`proceed_once`) or `Cancel` (`cancel`), never a persistent allow option.
 
 Omitted autonomy keeps Factory's default (medium in the probed CLI); Factory policy determines which operations request approval. Explicit `--autonomy` accepts off, low, medium, or high. `--full-auto` sets high and permits runtime permission requests; AskUser remains interactive.
 
@@ -38,8 +38,6 @@ Core verifies TaskBar confirmations with verifier tool `droid.approval` and cont
 
 ## Scoped collaboration tools and identity
 
-`createSdkMcpServer({ name: 'nia', version: '0.2.0', tools })` exposes `send_message` and `chat_history` using server-provided descriptions. The SDK hosts them on authenticated loopback HTTP; no bridge private key is passed to the child. Tool arguments cannot select another chat. `chat_history` is annotated read-only.
+Every `ready.tools` entry is exposed through a low-level MCP `Server` on an ephemeral authenticated loopback HTTP endpoint. This preserves raw JSON Schemas without Zod conversion. Droid receives `{ type: 'http', name: 'nia', url, headers: [{ name: 'Authorization', value: 'Bearer <token>' }] }`. Native Droid MCP ToolSearch owns loading; no custom search tool is registered. The endpoint and active transports close in `finally`.
 
-`send_message({ content })` calls `context.send`; `chat_history({ limit?, offset? })` calls `context.history`. Only explicit sends publish; assistant/result text remains private. Core publishes idle with the processed `deliveryId`.
-
-Incoming raw senders use `messages[].authorId`; structured channels may expose `senderId`. Native mentions use `<mention userId="<userId>" />` with an ID from the received message/member list.
+Calls delegate to `context.callTool(name, arguments)` and the unified `tool.call` RPC and return `result.content` as MCP text with `isError` preserved. The server applies schema defaults and validation. Only explicit sends publish; assistant/result text remains private. Core publishes idle with the processed `deliveryId`.

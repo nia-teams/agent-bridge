@@ -1,6 +1,6 @@
 # Claude Code SDK daemon runtime contract
 
-The adapter supplies a Claude Code runner to core `SessionHost`. Pairing, credentials, signing, WebSocket delivery, state, confirmation verification, and publication retries follow [core Agent Bridge v2](../../core/docs/SPECIFICATION.md).
+The adapter supplies a Claude Code runner to core `SessionHost`. Pairing, credentials, signing, WebSocket delivery, state, confirmation verification, and publication retries follow [core Agent Bridge v3](../../core/docs/SPECIFICATION.md).
 
 ## SDK and executable contract
 
@@ -16,7 +16,7 @@ Inspected npm `@anthropic-ai/claude-agent-sdk@0.3.319`; package metadata is reta
 - The SDK launches stream-json input/output with `--verbose`, `--permission-prompt-tool=stdio`, and `--resume=<sessionId>` for resumed queries. Initialize negotiates SDK tool servers and manifests.
 - The SDK recognizes `.js` / `.mjs` entries. For Windows `.cmd` / `.bat` wrappers and `.cjs` entries, the adapter supplies `spawnClaudeCodeProcess`, using core `executableCommand` and Node `spawn` with piped stdio. Prompts stay on SDK stdin, not shell command lines.
 - `settingSources: ['user', 'project', 'local']` retains local settings. `systemPrompt: { type: 'preset', preset: 'claude_code', append: context.systemPrompt }` preserves the Claude Code preset and adds server collaboration instructions.
-- `strictMcpConfig: true` loads only the supplied scoped `nia` tool server. SDK `createSdkMcpServer` and `tool` expose `send_message` / `chat_history` with Zod input schemas.
+- `strictMcpConfig: true` loads only the supplied scoped `nia` tool server. A low-level MCP `Server` serves every `ready.tools` entry with its raw JSON Schema. The SDK connects its `instance` through `.connect(transport)`. Tools without `deferLoading: true` carry `_meta: { "anthropic/alwaysLoad": true }`; deferred entries omit that metadata and use Claude Code native ToolSearch, including its model-dependent full-loading behavior. No custom search or meta-tool is registered. Calls delegate to `context.callTool` and the unified `tool.call` RPC; MCP text uses `result.content` verbatim and preserves `isError`.
 - `permissionMode` is `default`; `fullAuto` selects `bypassPermissions` and `allowDangerouslySkipPermissions: true`. Existing allow rules and hooks may resolve requests before the SDK callback.
 
 ## Sessions, publications, and cancellation
@@ -29,7 +29,7 @@ Cancellation aborts the SDK query and pending permissions. The runner removes it
 
 ## Questions and signed TaskBar permissions
 
-`canUseTool(name, input, detail)` returns `{ behavior: 'allow', updatedInput }` or `{ behavior: 'deny', message }`. Scoped GroupChat send/history tools are allowlisted; other tool requests call the active `SessionHost` permission handler.
+`canUseTool(name, input, detail)` returns `{ behavior: 'allow', updatedInput }` or `{ behavior: 'deny', message }`. All `mcp__nia__` collaboration tools bypass local approval because Nia Teams owns their ACLs and human-confirmation cards; other tool requests call the active `SessionHost` permission handler.
 
 `AskUserQuestion` posts questions to GroupChat and waits for the invoking human. A single question accepts text; multiple questions accept a JSON object keyed by question text. Answers return in `updatedInput.answers`. Timeout or cancellation denies the request.
 

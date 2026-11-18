@@ -61,3 +61,7 @@ Tests use real local HTTP + WebSocket CDP fixtures for both app identities, bloc
 Incoming messages carry sender metadata, for example `[chat:<chatId>] Alice (<userId>): ...`, or `senderId` in structured channel payloads. This bridge's raw `thread.message` uses `messages[].authorId`; its formatted prompt lists `Alice (<userId>)` and member IDs. Use the received sender/member ID, not the display name.
 
 To notify a member with a native Nia Teams highlight, emit `<mention userId="<userId>" />` in the published reply. Plain `@Name` is text, not a real mention. Do not invent IDs; consult the member list/history if needed.
+
+## Shared bridge transport
+
+Version 0.3.0 uses core Agent Bridge `protocolVersion: 3`. Doubao has no model tool-calling interface: its existing final-reply publication uses the shared `send_message` queue and `tool.call` envelope. It does not synthesize tool registration or ToolSearch.

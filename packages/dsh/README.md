@@ -201,8 +201,11 @@ Requires Node.js 20+ and a DeepSeek Harness `0.2.x` host providing `agents` (sta
 ### 2. Ordinary Questions, GroupChat Tools & Prompt Injection
 
 - **Ordinary questions (`user-questions/request`)**: Posts numbered choices in the GroupChat (mentioning the invoker when a 24-hex user ID is present) and waits FIFO per GroupChat. Any human trigger in the GroupChat can reply with `1`, an option label, `1,2` for multi-select, free text, or per-line / `Q1=1` batch answers. Question batches mixing approval-intent and ordinary items without request-level `request.intent` approval are rejected.
+Nia Teams supplies the available collaboration tools, including chat management, reminders, and shared links. The runtime exposes them through its native tool interface.
+
 - **`send_message({ content })`**: Publishes a message (Markdown, Rich HTML, `<mention userId="..." />`). Every reply requires an explicit call; turn-end text stays private.
-- **`chat_history({ limit?, offset? })`**: Reads older GroupChat messages (`limit` defaults to `50` in `1..100`, `offset` defaults to `0`). Both tools enforce `ownsAgent(agent)` (root Agent and `isOwnedBy` descendants only); child-agent final text stays private to the parent Agent.
+- **`chat_history({ limit?, offset? })`**: Reads older GroupChat messages (`limit` defaults to `50` in `1..100`, `offset` defaults to `0`). Collaboration tools enforce `ownsAgent(agent)` (root Agent and `isOwnedBy` descendants only); child-agent final text stays private to the parent Agent.
+
 - **Runtime prompt injection**: During `system-prompt/assemble`, the plugin injects GroupChat mention syntax (`<mention userId="24-hex-id" />`) and Rich HTML styling rules (`var(--*)` CSS variables, inline SVG icons, mobile-safe layout) without modifying host prompt files.
 
 - **Sender identity and native mentions**: Incoming headers list sender and member IDs; use `<mention userId="24-hex-id" />` to notify a member. Plain `@Name` does not create a mention.
@@ -238,8 +241,11 @@ const bridge = new BridgeClient(await loadCredentials(), {
   onError: error => console.error(error.message),
 });
 bridge.onThreadMessage(async frame => {
-  const history = await bridge.rpc('group_chat.history', {
-    sessionId: frame.sessionId, limit: 10, offset: 0,
+  const history = await bridge.rpc('tool.call', {
+    sessionId: frame.sessionId,
+    toolCallId: frame.triggerMessageId,
+    name: 'chat_history',
+    arguments: { limit: 10, offset: 0 },
   });
   console.log(frame.groupChat.title, history);
 });
@@ -273,7 +279,7 @@ npm pack --dry-run
 
 - Consumer AI skill: [`skills/nia-teams-dsh/SKILL.md`](./skills/nia-teams-dsh/SKILL.md) (`~/.dsh/profiles/<profile>/node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md` for `dsh plugin add`, or `node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md` for `npm install`)
 - Repository maintainer context: [`AGENTS.md`](./AGENTS.md)
-- Agent Bridge v2 wire specification: [`docs/SPECIFICATION.md`](./docs/SPECIFICATION.md)
+- Agent Bridge v3 wire specification: [`docs/SPECIFICATION.md`](./docs/SPECIFICATION.md)
 
 ## License
 

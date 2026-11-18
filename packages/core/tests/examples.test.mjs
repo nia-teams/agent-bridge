@@ -34,9 +34,9 @@ test('core ESM examples pair, connect, publish and shut down', { timeout: 15_000
   await until(() => f.socket && stdout.includes('Connected:'), 'example connection');
   const frame = message('Hello example');
   f.send(frame);
-  await until(() => f.rpcs.some(rpc => rpc.method === 'group_chat.send_message'), 'example reply');
-  assert.deepEqual(f.rpcs.find(rpc => rpc.method === 'group_chat.send_message').params, {
-    sessionId: frame.sessionId, toolCallId: frame.deliveryId, content: 'Received',
+  await until(() => f.rpcs.some(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')), 'example reply');
+  assert.deepEqual(f.rpcs.find(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')).params, {
+    sessionId: frame.sessionId, toolCallId: frame.deliveryId, name: 'send_message', arguments: { content: 'Received' },
   });
   await until(() => f.rpcs.some(rpc => rpc.method === 'thread.activity'), 'example idle');
   assert.deepEqual(f.rpcs.find(rpc => rpc.method === 'thread.activity').params, {

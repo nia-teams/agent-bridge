@@ -203,8 +203,11 @@ ACP 批准结果返回 `outcome: { outcome: "selected", optionId }`，批准只�
 
 ### 2. 群聊工具、消息与原生提及
 
+Nia Teams 提供可用的协作工具，包括群聊管理、提醒和分享链接，运行时通过本机工具接口加载。
+
 - `send_message({ content })` 向当前群聊发布 Markdown 或 Rich HTML，常用于进度与提问；所有回复均需显式发送，轮次结束文本保持私有。
 - `chat_history({ limit?, offset? })` 分页读取历史；`limit` 默认 50、范围 1..100，`offset` 默认 0 且为非负整数。运行时注入当前 Nia session，模型不传目标群聊 ID。
+
 - 群聊工具限定在当前活跃轮次；中断或群聊会话切换后，旧工具请求不能继续向新的群聊会话发布。
 
 群聊工具由随包的 MCP 服务提供，使用单轮临时凭证访问当前群聊；轮次结束后凭证失效。MCP 进程不读取 Nia Teams 私钥。报文与调用范围见 [协议规范](./docs/SPECIFICATION.md)。

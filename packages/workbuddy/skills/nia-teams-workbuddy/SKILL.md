@@ -29,6 +29,7 @@ Connect local WorkBuddy (CodeBuddy) into Nia Teams as an Agent that communicates
 
 ## GroupChat Replies & Mentions
 
+- Nia Teams supplies the collaboration tools available to this host; use their supplied descriptions and schemas.
 - Every reply requires explicit `send_message`; turn-end text remains private.
 - Use `send_message` for mid-turn progress and `chat_history` for earlier context; `AskUserQuestion` waits for the invoking human in GroupChat.
 - Read sender/member IDs from incoming headers (`messages[].authorId` in raw payloads) and format mentions as `<mention userId="<24-hex-id>" />` instead of plain `@Name`.

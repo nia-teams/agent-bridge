@@ -56,7 +56,7 @@ test('rotated keys fail before lease and superseded host stops reconnecting', as
 test('structured RPC errors preserve code and retryability', async t => {
   const f = await fixture(t); const bridge = new BridgeClient(f.credentials); t.after(() => bridge.close());
   await bridge.start();
-  f.handleRpc = (rpc, ws) => { ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 2, requestId: rpc.requestId, ok: false, error: { code: 'invalid_request', message: 'Invalid parameters', retryable: false } })); return true; };
+  f.handleRpc = (rpc, ws) => { ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: rpc.requestId, ok: false, error: { code: 'invalid_request', message: 'Invalid parameters', retryable: false } })); return true; };
   await assert.rejects(bridge.rpc('group_chat.history', { sessionId }), error => error.code === 'invalid_request' && error.retryable === false && error.message === 'Invalid parameters');
 });
 
@@ -150,7 +150,7 @@ for (const invalid of [
 });
 
 for (const type of ['ready', 'heartbeat', 'ack', 'rpc.request', 'rpc.response', 'thread.message', 'card.action', 'thread.cancel']) {
-  test(`reject non-v2 ${type} with 4400 invalid frame`, async t => {
+  test(`reject non-v3 ${type} with 4400 invalid frame`, async t => {
     const f = await fixture(t), bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 60_000 });
     t.after(() => bridge.close()); await bridge.start(); let closed;
     f.socket.on('close', (code, reason) => { closed = { code, reason: reason.toString() }; });
@@ -165,4 +165,16 @@ test('nonstring thread prompt is invalid and is never acknowledged', async t => 
   await bridge.start(); let code; f.socket.on('close', value => { code = value; });
   f.send({ ...message(), prompt: {} }); await until(() => code);
   assert.equal(code, 4400); assert.equal(accepted, false); assert.ok(!f.frames.some(f => f.type === 'ack'));
+});
+
+for (const deferLoading of [true, false, undefined]) test(`v3 handshake retains deferLoading=${deferLoading}`, async t => {
+  const f = await fixture(t); const tool = { name: 'future', description: 'Future server tool', inputSchema: { type: 'object' }, ...(deferLoading === undefined ? {} : { deferLoading }) };
+  f.readyOverrides = { tools: [tool] };
+  const bridge = new BridgeClient(f.credentials); t.after(() => bridge.close()); await bridge.start();
+  assert.deepEqual(bridge.getContract().tools, [tool]); assert.equal(f.frames.find(frame => frame.type === 'hello').protocolVersion, 3);
+});
+for (const deferLoading of ['true', 1, null, {}]) test(`invalid loading hint ${JSON.stringify(deferLoading)} rejects ready`, async t => {
+  const f = await fixture(t); f.readyOverrides = { tools: [{ name: 'future', description: 'Future', inputSchema: {}, deferLoading }] };
+  const bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 60000 }); t.after(() => bridge.close());
+  await assert.rejects(bridge.start(), /4401/); assert.equal(bridge.getContract(), undefined);
 });

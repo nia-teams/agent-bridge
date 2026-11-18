@@ -10,7 +10,7 @@ async function dir(t) { const d = await mkdtemp(join(tmpdir(), 'nia-codex-unit-'
 
 test('ThreadStore persists concurrent updates and reloads with private modes', async t => {
   const d = await dir(t), store = new ThreadStore(d); await store.load();
-  const a = { protocolVersion: 2, codexThreadId: 'a', groupChatId: 'group-a', updatedAt: new Date().toISOString() }, b = { ...a, codexThreadId: 'b' };
+  const a = { protocolVersion: 3, codexThreadId: 'a', groupChatId: 'group-a', updatedAt: new Date().toISOString() }, b = { ...a, codexThreadId: 'b' };
   await Promise.all([store.set('a', a), store.set('b', b)]);
   const reloaded = new ThreadStore(d); await reloaded.load();
   assert.deepEqual(reloaded.get('a'), a); assert.deepEqual(reloaded.get('b'), b);
@@ -23,7 +23,7 @@ test('ThreadStore rejects symlink targets on read and write without overwriting 
   await symlink(target, join(d, 'threads.json'));
   const store = new ThreadStore(d);
   await assert.rejects(store.load(), /private regular file/);
-  await assert.rejects(store.set('a', { protocolVersion: 2, codexThreadId: 'a', groupChatId: 'g', updatedAt: 'now' }), /Invalid threads/);
+  await assert.rejects(store.set('a', { protocolVersion: 3, codexThreadId: 'a', groupChatId: 'g', updatedAt: 'now' }), /Invalid threads/);
   assert.equal(await readFile(target, 'utf8'), '{}');
 });
 
@@ -65,8 +65,20 @@ test('AppServer launches a non-executable JS entrypoint through Node', async t =
 
 test('ThreadStore ignores legacy and wrong-version mappings without losing valid v2 mappings', async t => {
   const d = await dir(t), base = { codexThreadId: 'legacy', groupChatId: 'group', updatedAt: 'now' };
-  await writeFile(join(d, 'threads.json'), JSON.stringify({ old: base, v1: { ...base, protocolVersion: 1 }, current: { ...base, protocolVersion: 2 } }), { mode: 0o600 });
+  await writeFile(join(d, 'threads.json'), JSON.stringify({ old: base, v1: { ...base, protocolVersion: 1 }, current: { ...base, protocolVersion: 3 } }), { mode: 0o600 });
   const store = new ThreadStore(d); await store.load();
   assert.equal(store.get('old'), undefined); assert.equal(store.get('v1'), undefined);
-  assert.equal(store.get('current').protocolVersion, 2);
+  assert.equal(store.get('current').protocolVersion, 3);
+});
+
+test('canonical tool fingerprints ignore object-key order, preserve schema/tool changes and provider loading semantics', async () => {
+  const { dynamicToolSpecs, toolsFingerprint } = await import('../dist/host.js');
+  const tool = { name: 'future', description: 'Future', inputSchema: { type: 'object', properties: { value: { type: 'string' } } }, deferLoading: true };
+  assert.equal(dynamicToolSpecs([tool], 'openai')[0].deferLoading, true);
+  for (const provider of ['deepseek', 'azure', 'custom']) assert.equal(Object.hasOwn(dynamicToolSpecs([tool], provider)[0], 'deferLoading'), false);
+  const a = dynamicToolSpecs([tool], 'openai');
+  const b = [{ inputSchema: { properties: { value: { type: 'string' } }, type: 'object' }, deferLoading: true, description: 'Future', name: 'future', type: 'function' }];
+  assert.equal(toolsFingerprint(a), toolsFingerprint(b));
+  assert.notEqual(toolsFingerprint(a), toolsFingerprint(dynamicToolSpecs([{ ...tool, description: 'Changed' }], 'openai')));
+  assert.notEqual(toolsFingerprint(a), toolsFingerprint(dynamicToolSpecs([tool], 'deepseek')));
 });

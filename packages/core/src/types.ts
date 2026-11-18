@@ -1,4 +1,4 @@
-/** Agent Bridge v2 wire values. No host-runtime imports. */
+/** Agent Bridge v3 wire values. No host-runtime imports. */
 export interface Credentials {
   serverUrl: string;
   teamId: string;
@@ -12,7 +12,7 @@ export interface Credentials {
   pairedAt: string;
 }
 export interface PushBase {
-  protocolVersion: 2;
+  protocolVersion: 3;
   deliveryId: string;
   groupChatId: string;
   sessionId: string;
@@ -40,14 +40,14 @@ export interface ThreadCancel extends PushBase {
   type: 'thread.cancel'; reason: 'user_aborted' | 'removed_from_group';
 }
 export type PushFrame = ThreadMessage | CardAction | ThreadCancel;
-export interface BridgeToolDefinition { name: string; description: string; inputSchema: Record<string, unknown> }
+export interface BridgeToolDefinition { name: string; description: string; inputSchema: Record<string, unknown>; deferLoading?: boolean }
 export interface BridgeContract { systemPrompt: string; tools: BridgeToolDefinition[] }
 export interface ReadyFrame {
-  type: 'ready'; protocolVersion: 2; connectionGeneration: string;
+  type: 'ready'; protocolVersion: 3; connectionGeneration: string;
   agent: { teamId: string; slug: string; name: string; orgName?: string }; issuer: string;
   systemPrompt: string; tools: BridgeToolDefinition[];
 }
-export type RpcMethod = 'group_chat.send_message' | 'group_chat.history' | 'card.upsert' | 'card.cancel' | 'thread.activity';
+export type RpcMethod = 'tool.call' | 'group_chat.send_message' | 'group_chat.history' | 'card.upsert' | 'card.cancel' | 'thread.activity';
 export interface Challenge {
   challengeId: string; teamId: string; keyGeneration: number; nonce: string; expiresInSeconds: number;
 }

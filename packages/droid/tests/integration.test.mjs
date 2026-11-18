@@ -8,7 +8,7 @@ import { createDroidRunner } from '../dist/runner.js';
 const binary = fileURLToPath(new URL('./mock-droid.mjs', import.meta.url));
 await chmod(binary, 0o755);
 const idle = f => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle');
-const sends = f => f.rpcs.filter(r => r.method === 'group_chat.send_message');
+const sends = f => f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message'));
 async function setup(t, options = {}) {
   const f = await fixture(t), errors = [], contexts = [];
   const bridge = new BridgeClient(f.credentials, { rpcTimeoutMs: 300, reconnectBaseMs: 10 });
@@ -18,7 +18,7 @@ async function setup(t, options = {}) {
   t.after(async () => { await host.close(); bridge.close(); });
   const logs = async () => (await readFile(`${f.dir}/mock-log.jsonl`, 'utf8')).trim().split('\n').map(JSON.parse);
   const done = async n => until(() => idle(f).length >= n, 'Droid idle', 10000);
-  return { f, errors, host, contexts, logs, done };
+  return { f, bridge, errors, host, contexts, logs, done };
 }
 test('native SDK initializes, preserves private text, routes MCP, resumes durably and recovers only missing sessions', async t => {
   const { f, host, errors, logs, contexts, done } = await setup(t);
@@ -32,10 +32,10 @@ test('native SDK initializes, preserves private text, routes MCP, resumes durabl
   host.message({ ...message(), prompt: '<system-reminder>use tools</system-reminder>' }); await done(2);
   assert.equal(contexts[1].resume, saved);
   events = await logs(); assert.ok(events.some(e => e.frame?.method === 'droid.load_session'));
-  assert.deepEqual(sends(f).map(r => r.params.content), ['Droid interim']);
-  assert.equal(f.rpcs.find(r => r.method === 'group_chat.history').params.limit, 2);
+  assert.deepEqual(sends(f).map(r => r.params.arguments.content), ['Droid interim']);
+  assert.equal(f.rpcs.find(r => (r.method === 'tool.call' && r.params.name === 'chat_history')).params.arguments.limit, 2);
   assert.equal(events.find(e => e.tools).tools.tools.find(tool => tool.name === 'send_message').description, contract.tools[0].description);
-  assert.equal(events.find(e => e.tools).tools.tools.find(tool => tool.name === 'chat_history').annotations.readOnlyHint, true);
+  assert.deepEqual(events.find(e => e.tools).tools.tools.find(tool => tool.name === 'chat_history').inputSchema, contract.tools[1].inputSchema);
   await unlink(`${f.dir}/mock-session-${saved}.json`);
   host.message(message('third')); await done(3);
   const fresh = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'))[agentThreadId].sessionId;
@@ -69,7 +69,7 @@ for (const [prompt, options] of [['collaboration', {}], ['collaboration scoped',
 });
 for (const [fullAuto, answer] of [[false, 'Blue'], [true, 'Blue'], [false, 'A custom color not listed']]) test(`AskUser preserves option or free-text answers (fullAuto=${fullAuto}, answer=${answer})`, async t => {
   const { f, host, logs, done, errors } = await setup(t, { fullAuto }); host.message(message('question'));
-  await until(() => sends(f).length === 1, 'question', 10000); assert.match(sends(f)[0].params.content, /Choose a color/);
+  await until(() => sends(f).length === 1, 'question', 10000); assert.match(sends(f)[0].params.arguments.content, /Choose a color/);
   host.message(message(answer)); await done(1);
   assert.deepEqual((await logs()).find(e => e.askResult).askResult.answers, [{ index: 1, question: 'Choose a color', answer }]);
   assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0); assert.deepEqual(errors, []);
@@ -123,7 +123,7 @@ test('AskUser preserves indexed multi-question option and custom free-text answe
   const { f, host, logs, done, errors } = await setup(t);
   host.message(message('multi-question'));
   await until(() => sends(f).length === 1, 'multi-question publication', 10000);
-  const content = sends(f)[0].params.content;
+  const content = sends(f)[0].params.arguments.content;
   for (const label of ['Choose a color', '- Blue', '- Red', 'Describe the task', 'JSON object keyed by question text']) assert.ok(content.includes(label));
   host.message(message(JSON.stringify({ 'Choose a color': 'Blue', 'Describe the task': 'Review the patch, then explain the trade-offs.' })));
   await done(1);
@@ -134,10 +134,27 @@ test('AskUser preserves indexed multi-question option and custom free-text answe
   assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
   assert.deepEqual(errors, []);
 });
-test('optional history arguments receive defaults from core context.history', async t => {
+test('optional history arguments are forwarded verbatim for server-side defaults', async t => {
   const { f, host, done, errors } = await setup(t);
   host.message(message('use tools default history')); await done(1);
-  const params = f.rpcs.find(r => r.method === 'group_chat.history').params;
-  assert.equal(params.limit, 50); assert.equal(params.offset, 0);
+  const params = f.rpcs.find(r => (r.method === 'tool.call' && r.params.name === 'chat_history')).params;
+  assert.deepEqual(params.arguments, {}); assert.equal(params.name, 'chat_history');
+  assert.deepEqual(errors, []);
+});
+
+test('native external MCP lists and calls future deferred tools with raw schemas and no local approval', async t => {
+  const { f, bridge, host, logs, done, errors } = await setup(t);
+  const tool = { name: 'future_tool', description: 'Future Droid tool', inputSchema: { type: 'object', properties: { value: { enum: ['new'] } } }, deferLoading: true };
+  bridge.getContract().tools.push(tool);
+  f.handleRpc = (frame, ws) => {
+    if (frame.method !== 'tool.call' || frame.params.name !== tool.name) return false;
+    ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: frame.requestId, ok: true, result: { content: '{"future":true}' } })); return true;
+  };
+  host.message(message('future tools collaboration future')); await done(1);
+  const events = await logs(), listed = events.find(e => e.tools).tools.tools.find(t => t.name === tool.name);
+  assert.deepEqual(listed.inputSchema, tool.inputSchema); assert.equal(listed.deferLoading, undefined);
+  assert.ok(events.some(e => e.mcpResult?.content?.[0]?.text === '{"future":true}'));
+  assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
+  assert.deepEqual(f.rpcs.find(r => r.params.name === tool.name).params.arguments, { value: 'new' });
   assert.deepEqual(errors, []);
 });

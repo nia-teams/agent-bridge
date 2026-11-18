@@ -200,8 +200,11 @@ nia-dsh --help
 ### 2. 普通提问、群聊工具与提示词注入
 
 - **普通提问（`user-questions/request`）**：在群聊中发送编号选项（存在 24 位 hex 用户 ID 时 提及发起提问的人），按群聊 FIFO 排队等待。群聊内任何人类成员均可回复 `1`、选项文本、多选 `1,2`、自由文本，或多题逐行 / `Q1=1` 格式作答。混有单题审批意图与普通问题且未在顶层声明 `request.intent` 为审批意图的批次会被拒绝。
+Nia Teams 提供可用的协作工具，包括群聊管理、提醒和分享链接，运行时通过本机工具接口加载。
+
 - **`send_message({ content })`**：向当前群聊发布回复或进度（支持 Markdown、Rich HTML 与 `<mention userId="..." />`）；轮次结束文本不发布。
-- **`chat_history({ limit?, offset? })`**：分页读取群聊历史消息（`limit` 默认 `50`、范围 `1..100`，`offset` 默认 `0`）。两个工具均通过 `ownsAgent(agent)` 限制仅根 Agent 及其 `isOwnedBy` 子孙可调用；派生 Agent 的最终文本对父 Agent 保持私有。
+- **`chat_history({ limit?, offset? })`**：分页读取群聊历史消息（`limit` 默认 `50`、范围 `1..100`，`offset` 默认 `0`）。协作工具通过 `ownsAgent(agent)` 限制仅根 Agent 及其 `isOwnedBy` 子孙可调用；派生 Agent 的最终文本对父 Agent 保持私有。
+
 - **运行时提示词注入**：插件在 `system-prompt/assemble` 阶段注入群聊 `<mention userId="24-hex-id" />` 语法与 Rich HTML 样式规范（`var(--*)` 主题 CSS 变量、内联 SVG 图标、移动端自适应布局），不修改原有的提示词文件。
 
 - **发送者与原生提及**：传入消息头列出发送者和成员 ID；使用 `<mention userId="24-hex-id" />` 通知成员，纯文本 `@Name` 不触发提及。
@@ -228,7 +231,7 @@ nia-dsh --help
 
 ## 六、编程接口与测试验证
 
-不依赖 DeepSeek Harness 时，也可使用 `BridgeClient` 在任意 Node.js 进程中接入 Agent Bridge v2：
+不依赖 DeepSeek Harness 时，也可使用 `BridgeClient` 在任意 Node.js 进程中接入 Agent Bridge v3：
 
 ```js
 import { BridgeClient, loadCredentials } from '@nia-teams/dsh-plugin';
@@ -237,8 +240,11 @@ const bridge = new BridgeClient(await loadCredentials(), {
   onError: error => console.error(error.message),
 });
 bridge.onThreadMessage(async frame => {
-  const history = await bridge.rpc('group_chat.history', {
-    sessionId: frame.sessionId, limit: 10, offset: 0,
+  const history = await bridge.rpc('tool.call', {
+    sessionId: frame.sessionId,
+    toolCallId: frame.triggerMessageId,
+    name: 'chat_history',
+    arguments: { limit: 10, offset: 0 },
   });
   console.log(frame.groupChat.title, history);
 });
@@ -272,7 +278,7 @@ npm pack --dry-run
 
 - 接入方 AI Skill：[`skills/nia-teams-dsh/SKILL.md`](./skills/nia-teams-dsh/SKILL.md)（`dsh plugin add` 安装后位于 `~/.dsh/profiles/<profile>/node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md`，`npm install` 安装后位于 `node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md`）
 - 仓库维护者上下文：[`AGENTS.md`](./AGENTS.md)
-- Agent Bridge v2 协议规范：[`docs/SPECIFICATION.md`](./docs/SPECIFICATION.md)
+- Agent Bridge v3 协议规范：[`docs/SPECIFICATION.md`](./docs/SPECIFICATION.md)
 
 ## 许可证
 

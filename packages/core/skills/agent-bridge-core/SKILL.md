@@ -9,7 +9,7 @@ Connect a custom Node.js Agent runtime into Nia Teams as an Agent that communica
 
 ## Boundaries
 
-- Core owns Agent Bridge v2 Ed25519 pairing, local credential storage (`0700` dir / `0600` file), authenticated WebSocket lease & reconnect, FIFO publications, `SessionHost` turn queues, and RS256 TaskBar confirmation verification.
+- Core owns Agent Bridge v3 Ed25519 pairing, local credential storage (`0700` dir / `0600` file), authenticated WebSocket lease & reconnect, FIFO publications, `SessionHost` turn queues, and RS256 TaskBar confirmation verification.
 - Your runtime owns model execution, local tools, workspace access, and session persistence.
 - Requires Node.js 20+ ESM; per-chat session IDs isolate conversation state, not the OS or filesystem.
 
@@ -21,12 +21,13 @@ Connect a custom Node.js Agent runtime into Nia Teams as an Agent that communica
 - Supply optional `clientName` (1–80 chars) and PNG data URL `avatar` (`data:image/png;base64,...`, ≤64 KiB, ≤1024×1024) in both `pairHost` and `BridgeClient` / `runSessionDaemon` so Nia Teams displays your Agent icon on the pairing page and in GroupChat.
 
 - Invite-code onboarding uses `connectWithInvite({ inviteCode, userName, agentName })`; register message/cancel handlers before `bridge.start()`.
-- A `TurnRunner` returns `void`; `context.send` publishes replies and `context.history` reads history. Core does not publish runtime return text.
+- A `TurnRunner` returns `void`; `context.callTool(name, args, toolCallId?)` returns `{ content: string, isError?: boolean }`. Pass content through once; `context.send` and `context.history` are conveniences. Core does not publish runtime return text.
 
 ## GroupChat Replies & Mentions
 
 - Read instructions and tool definitions with `bridge.getContract()`; forward server prompts with `resolveThreadPrompt(frame)` (including resumed sessions). `formatThreadMessage` is the fallback for missing or empty prompts; raw sender IDs are `messages[].authorId` and member IDs are `groupChat.members[].id`.
-- Publish messages with `bridge.rpc('group_chat.send_message', { sessionId, content, toolCallId })` (or `PublicationQueue.enqueue`) and fetch history with `bridge.rpc('group_chat.history', { sessionId, limit, offset })`.
+- Invoke advertised tools with `bridge.rpc('tool.call', { sessionId, toolCallId, name, arguments })`; `send_message` arguments are `{ content }`, history arguments are `{ limit, offset }`. Keep message publication in `PublicationQueue.enqueue` to preserve reconnect retries and publication-before-idle ordering.
+- Host-native tool discovery owns loading hints. Serve the supplied JSON Schemas without conversion and let Nia Teams enforce collaboration permissions.
 - Format mentions in published replies as `<mention userId="<24-hex-id>" />` using received sender/member IDs rather than display names.
 
 - At turn end report `thread.activity` with `{ sessionId, state: 'idle', deliveryId }`. Silent-turn reminders arrive as server `thread.message` prompts containing `<system-reminder>`.

@@ -20,7 +20,7 @@ test('bounded queue rejects overflow without evicting accepted items and disposa
   assert.throws(() => queue.enqueue(publication('second')), /queue is full/);
   bridge.ready(); await first;
   const second = queue.enqueue(publication('second')); await second;
-  assert.deepEqual(bridge.calls.filter(call => call.method === 'group_chat.send_message').slice(-2).map(call => call.params.toolCallId), ['first', 'second']);
+  assert.deepEqual(bridge.calls.filter(call => (call.method === 'tool.call' && call.params.name === 'send_message')).slice(-2).map(call => call.params.toolCallId), ['first', 'second']);
   bridge.online = false;
   const pending = queue.enqueue(publication('pending')); const rejected = assert.rejects(pending, /closed/);
   queue.close(); await rejected;
@@ -38,7 +38,7 @@ test('activity-only retry does not resend an acknowledged message, and newer tur
   try {
     const pending = queue.enqueue(publication('sent', { shouldSyncActivity: () => current }));
     await queue.flush(); current = false; bridge.ready(); await pending;
-    assert.equal(bridge.calls.filter(call => call.method === 'group_chat.send_message').length, 1);
+    assert.equal(bridge.calls.filter(call => (call.method === 'tool.call' && call.params.name === 'send_message')).length, 1);
     assert.equal(bridge.calls.filter(call => call.method === 'thread.activity').length, 1);
   } finally { queue.close(); }
 });
@@ -46,7 +46,7 @@ test('activity-only retry does not resend an acknowledged message, and newer tur
 test('retryable RPC errors retry even without a socket reconnect', async () => {
   const bridge = stubBridge(); bridge.online = true; let failures = 1;
   const original = bridge.rpc;
-  bridge.rpc = async (method, params) => { if (method === 'group_chat.send_message' && failures-- > 0) throw Object.assign(new Error('busy'), { retryable: true }); return original.call(bridge, method, params); };
+  bridge.rpc = async (method, params) => { if (method === 'tool.call' && failures-- > 0) throw Object.assign(new Error('busy'), { retryable: true }); return original.call(bridge, method, params); };
   const queue = new PublicationQueue(bridge, { retryMs: 5 });
   try { await queue.enqueue(publication('retryable')); assert.equal(failures, -1); }
   finally { queue.close(); }
@@ -55,7 +55,7 @@ test('retryable RPC errors retry even without a socket reconnect', async () => {
 test('a ready event racing an in-flight RPC failure cannot strand the publication', async () => {
   const bridge = stubBridge(); let fail; let attempts = 0;
   bridge.rpc = async method => {
-    if (method === 'group_chat.send_message' && ++attempts === 1) return await new Promise((_, reject) => { fail = reject; });
+    if (method === 'tool.call' && ++attempts === 1) return await new Promise((_, reject) => { fail = reject; });
     return {};
   };
   const queue = new PublicationQueue(bridge, { retryMs: 60_000 });
@@ -74,6 +74,16 @@ test('queue enforces aggregate byte and frame bounds before admission without dr
     assert.throws(() => queue.enqueue(publication('too-many-bytes', { content: 'x'.repeat(512) })), /queue is full/);
     assert.throws(() => queue.enqueue(publication('oversize', { content: 'x'.repeat(512 * 1024) })), error => error.retryable === false);
     bridge.ready(); await pending;
-    assert.equal(bridge.calls.filter(call => call.method === 'group_chat.send_message' && call.params.toolCallId !== 'kept').length, 0);
+    assert.equal(bridge.calls.filter(call => (call.method === 'tool.call' && call.params.name === 'send_message') && call.params.toolCallId !== 'kept').length, 0);
+  } finally { queue.close(); }
+});
+
+test('tool.call publication keeps the session/idempotency envelope and rejects isError before idle', async () => {
+  const bridge = stubBridge(); bridge.online = true;
+  bridge.rpc = async (method, params) => { bridge.calls.push({ method, params }); return { content: 'Publication denied', isError: true }; };
+  const queue = new PublicationQueue(bridge);
+  try {
+    await assert.rejects(queue.enqueue(publication('call-1')), /Publication denied/);
+    assert.deepEqual(bridge.calls, [{ method: 'tool.call', params: { sessionId, toolCallId: 'call-1', name: 'send_message', arguments: { content: 'call-1' } } }]);
   } finally { queue.close(); }
 });

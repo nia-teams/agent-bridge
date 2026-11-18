@@ -1,6 +1,6 @@
 # Agent Bridge protocol map
 
-The shared transport contract is [core Agent Bridge v2](../packages/core/docs/SPECIFICATION.md). It defines Ed25519 pairing, challenge/lease authentication, WebSocket frames, publication RPCs and signed TaskBar confirmation verification. The repository has seven client adapter packages plus the shared core (eight packages total). Adapter documents describe only their additional runtime contracts:
+The shared transport contract is [core Agent Bridge v3](../packages/core/docs/SPECIFICATION.md). It defines Ed25519 pairing, challenge/lease authentication, WebSocket frames, publication RPCs and signed TaskBar confirmation verification. The repository has seven client adapter packages plus the shared core (eight packages total). Adapter documents describe only their additional runtime contracts:
 
 | Adapter | Runtime contract |
 | --- | --- |
@@ -12,7 +12,7 @@ The shared transport contract is [core Agent Bridge v2](../packages/core/docs/SP
 | Antigravity | [ACP stdio sessions, streaming, permissions, scoped MCP](../packages/agy/docs/SPECIFICATION.md) |
 | Factory Droid | [Native TypeScript SDK, sessions, MCP, permissions](../packages/droid/docs/SPECIFICATION.md) |
 
-Agent Bridge 0.2.0 uses WebSocket `protocolVersion: 2`. Nia Teams supplies collaboration instructions in `ready.systemPrompt` and tool definitions (`name`, `description`, `inputSchema`) in `ready.tools`. Model-facing `send_message` and `chat_history` map to `group_chat.send_message` and `group_chat.history`. Turn completion reports idle with `deliveryId`; silent-turn reminders arrive as server `thread.message` prompts.
+Agent Bridge 0.3.0 uses WebSocket `protocolVersion: 3`. Nia Teams supplies collaboration instructions in `ready.systemPrompt` and tool definitions (`name`, `description`, `inputSchema`, `deferLoading?: boolean`) in `ready.tools`. All model-facing tools invoke `tool.call` with host-bound session context. Turn completion reports idle with `deliveryId`; silent-turn reminders arrive as server `thread.message` prompts.
 
 ## Client-owned branding: pairing and authenticated lease
 

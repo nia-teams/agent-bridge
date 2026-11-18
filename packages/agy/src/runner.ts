@@ -55,7 +55,7 @@ export class AgyRunner {
         void client.close().finally(() => this.children.delete(client));
       };
       try {
-        const result = await client.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.2.0' } });
+        const result = await client.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.0' } });
         if (result.protocolVersion !== 1) throw new Error('Unsupported ACP protocol version');
         return client;
       } catch (error) { await client.close(); throw error; }
@@ -132,7 +132,9 @@ export class AgyRunner {
       try {
         // Prefix ACP names so a runtime tool cannot impersonate SessionHost's human-question path.
         const tool = `agy:${String(params.toolCall.name ?? params.toolCall.title ?? params.toolCall.toolCallId ?? 'tool')}`;
-        const result = await active.context.permission(tool, { sessionId: params.sessionId, toolCall: params.toolCall, options: params.options });
+        const name = String(params.toolCall.name ?? '');
+        const collaboration = name.startsWith('mcp__nia-teams__') || name.startsWith('nia-teams___') || params.toolCall.serverName === 'nia-teams';
+        const result = collaboration ? { behavior: 'allow' } : await active.context.permission(tool, { sessionId: params.sessionId, toolCall: params.toolCall, options: params.options });
         allowed = result.behavior === 'allow' && !active.context.signal.aborted && this.active.get(String(params.sessionId)) === active;
       } catch { allowed = false; }
     }

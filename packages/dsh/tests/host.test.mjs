@@ -27,7 +27,7 @@ test('thread drives deterministic fresh/resumed sessions, formats roster and kee
   await event(ctx, 'turn/start', { turn: 1 }); await event(ctx, 'tool/call', { turn: 1, name: 'read_file' });
   await event(ctx, 'assistant/message', { turn: 1, message: { content: [{ type: 'thinking', text: 'private reasoning' }, { type: 'text', text: 'Final answer' }] } });
   await event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } });
-  const sent = f.rpcs.find(rpc => rpc.method === 'group_chat.send_message');
+  const sent = f.rpcs.find(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message'));
   assert.equal(sent, undefined);
   assert.equal(f.rpcs.at(-1).params.state, 'idle');
   assert.equal(ctx.options.get('session/event').global, true);
@@ -49,7 +49,7 @@ test('explicit send_message publishes while final assistant recap, aborted turns
   await tool.definition.execute({ content: 'Published via tool' }, { agent, callId: 'progress:1', signal: new AbortController().signal });
   await event(ctx, 'assistant/message', { turn: 2, message: { content: [{ type: 'text', text: 'Recap that should stay private' }] } });
   await event(ctx, 'turn/end', { turn: 2, reason: { kind: 'completed' } });
-  assert.deepEqual(f.rpcs.filter(rpc => rpc.method === 'group_chat.send_message').map(rpc => rpc.params.content), ['Published via tool']);
+  assert.deepEqual(f.rpcs.filter(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')).map(rpc => rpc.params.arguments.content), ['Published via tool']);
   // Post-tool EMPTY_RESPONSE (e.g. Gemini silent stop after send_message) lands cleanly on idle without false error badge.
   await event(ctx, 'turn/start', { turn: 21 });
   await tool.definition.execute({ content: 'Already delivered via tool' }, { agent, callId: 'progress:2', signal: new AbortController().signal });
@@ -69,7 +69,7 @@ test('explicit send_message publishes while final assistant recap, aborted turns
   const child = ctx.addChild('child', agent); await event(ctx, 'turn/start', { turn: 1 }, child.id);
   await event(ctx, 'assistant/message', { turn: 1, message: { content: [{ type: 'text', text: 'Child private result' }] } }, child.id);
   await event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } }, child.id);
-  assert.equal(f.rpcs.filter(rpc => rpc.method === 'group_chat.send_message').length, 3);
+  assert.equal(f.rpcs.filter(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')).length, 3);
   const stranger = ctx.addChild('stranger');
   assert.equal(tool.config.when({ agent: stranger }), false);
   await assert.rejects(tool.definition.execute({ content: 'spoof' }, { agent: stranger }), /does not own/);
@@ -88,7 +88,7 @@ test('real RS256 approval allows once, tampered argument hash fails closed, desc
   const tampered = await cardAfter(f, 1); await f.confirm(tampered, { tamper: true }); assert.equal(await denied, 'rejected');
   const noToken = ctx.emit('approval/request', { ...req, callId: 'call-3' }, () => assert.fail('must intercept'));
   const unsigned = await cardAfter(f, 2);
-  f.send({ type: 'card.action', protocolVersion: 2, deliveryId: 'unsigned', sessionId, groupChatId, agentThreadId, cardId: unsigned.params.cardId, decision: 'approved', clickedBy: { userId, name: 'Alex' } });
+  f.send({ type: 'card.action', protocolVersion: 3, deliveryId: 'unsigned', sessionId, groupChatId, agentThreadId, cardId: unsigned.params.cardId, decision: 'approved', clickedBy: { userId, name: 'Alex' } });
   assert.equal(await noToken, 'rejected');
   const stranger = ctx.addChild('stranger');
   assert.equal(await ctx.emit('approval/request', { ...req, agent: stranger }, async () => 'fallback'), 'fallback');
@@ -108,15 +108,15 @@ test('ordinary questions consume next human reply without duplicate followup, pa
   const { f, ctx, agent } = await setup(t);
   const request = { agent, questions: [{ id: 'color', question: 'Choose colors', options: [{ label: 'Red' }, { label: 'Blue' }], multiSelect: true }, { id: 'name', question: 'Project name?' }] };
   const answer = ctx.emit('user-questions/request', request);
-  await until(() => f.rpcs.some(rpc => rpc.method === 'group_chat.send_message'));
-  const prompt = f.rpcs.find(rpc => rpc.method === 'group_chat.send_message').params.content;
+  await until(() => f.rpcs.some(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')));
+  const prompt = f.rpcs.find(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')).params.arguments.content;
   assert.match(prompt, new RegExp(`<mention userId="${userId}" />`)); assert.match(prompt, /1\. Red/);
   f.send(message('Q1=1,2\nQ2=New project'));
   assert.deepEqual(await answer, { answers: [{ id: 'color', selected: ['Red', 'Blue'] }, { id: 'name', selected: [], custom: 'New project' }] });
   assert.equal(ctx.calls.followup.length, 1);
   const abort = new AbortController(); const cancelled = ctx.emit('user-questions/request', { ...request, signal: abort.signal });
   const rejection = assert.rejects(cancelled, error => error.name === 'UserQuestionError' && error.code === 'ASK_ABORTED');
-  await until(() => f.rpcs.filter(rpc => rpc.method === 'group_chat.send_message').length === 2); abort.abort(); await rejection;
+  await until(() => f.rpcs.filter(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')).length === 2); abort.abort(); await rejection;
   f.send(message('Resume normal chat')); await until(() => ctx.calls.followup.length === 2);
 });
 test('approval-intent questions use signed cards, choose exact intent labels, and map dismissal to deny', async t => {
@@ -134,8 +134,8 @@ test('thread cancellation stops Agent and pending questions; group removal dispo
   const { f, ctx, host, agent } = await setup(t);
   const answer = ctx.emit('user-questions/request', { agent, questions: [{ id: 'q', question: 'Continue?' }] });
   const rejected = assert.rejects(answer, error => error.code === 'ASK_ABORTED');
-  await until(() => f.rpcs.some(rpc => rpc.method === 'group_chat.send_message'));
-  f.send({ type: 'thread.cancel', protocolVersion: 2, deliveryId: 'stop', sessionId, groupChatId, agentThreadId, reason: 'removed_from_group' });
+  await until(() => f.rpcs.some(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')));
+  f.send({ type: 'thread.cancel', protocolVersion: 3, deliveryId: 'stop', sessionId, groupChatId, agentThreadId, reason: 'removed_from_group' });
   await rejected; await until(() => ctx.calls.disposed.includes(agentThreadId));
   assert.equal(ctx.calls.cancelled.length, 1); assert.equal(host.ownsAgent(agent), false);
 });
@@ -166,14 +166,14 @@ test('abort before card upsert response cancels again after upsert; already-abor
   const pending = ctx.emit('approval/request', { agent, toolName: 'shell', callId: 'slow-upsert', signal: abort.signal });
   const card = await cardAfter(f); abort.abort();
   await until(() => f.rpcs.some(rpc => rpc.method === 'card.cancel'));
-  f.send({ type: 'rpc.response', protocolVersion: 2, requestId: card.requestId, ok: true, result: { cardId: card.params.cardId } });
+  f.send({ type: 'rpc.response', protocolVersion: 3, requestId: card.requestId, ok: true, result: { cardId: card.params.cardId } });
   assert.equal(await pending, 'cancelled');
   assert.equal(f.rpcs.filter(rpc => rpc.method === 'card.cancel').length, 2);
 });
 test('a question answer is consumed once; a following message starts the next turn even while answer cleanup is in flight', async t => {
   const { f, ctx, agent } = await setup(t);
   const pending = ctx.emit('user-questions/request', { agent, questions: [{ id: 'q', question: 'Pick one', options: [{ label: 'Yes' }] }] });
-  await until(() => f.rpcs.some(rpc => rpc.method === 'group_chat.send_message'));
+  await until(() => f.rpcs.some(rpc => (rpc.method === 'tool.call' && rpc.params.name === 'send_message')));
   f.send(message('1')); f.send(message('Next task'));
   assert.deepEqual(await pending, { answers: [{ id: 'q', selected: ['Yes'] }] });
   await until(() => ctx.calls.followup.length === 2);
@@ -212,15 +212,43 @@ test('server reminder reuses local DSH session and tools expose the ready contra
   await event(ctx, 'turn/start', { turn: 1 });
   await event(ctx, 'assistant/message', { turn: 1, content: 'Private result' });
   await event(ctx, 'turn/end', { turn: 1, reason: { kind: 'completed' } });
-  assert.equal(f.rpcs.filter(r => r.method === 'group_chat.send_message').length, 0);
+  assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length, 0);
   const reminder = { ...message(), prompt: '<system-reminder>Send a reply.</system-reminder>' };
   f.send(reminder); await until(() => ctx.calls.followup.length === 2);
   assert.equal(ctx.calls.followup[1].message.content[0].text, reminder.prompt);
   assert.equal(ctx.calls.create.length, 1);
   await event(ctx, 'turn/start', { turn: 2 });
   const result = await send.execute({ content: 'Explicit reply' }, { agent, callId: 'reminder-send' });
-  assert.equal(result.message, '消息已发布到聊天');
+  assert.equal(result, '消息已发布到聊天');
   await ctx.toolDefinitions.get('chat_history').definition.execute({ limit: 5 }, { agent });
   await event(ctx, 'turn/end', { turn: 2, reason: { kind: 'completed' } });
   assert.equal(f.rpcs.filter(r => r.method === 'thread.activity').at(-1).params.deliveryId, reminder.deliveryId);
+});
+
+for (const injectAfterReady of [false, true]) test(`dynamic DSH tool-service injection after ready=${injectAfterReady} and reconnect reconciliation`, async t => {
+  const f = await fixture(t), ctx = hostContext();
+  const bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 10 });
+  let inject; if (injectAfterReady) ctx.inject = (_names, callback) => { inject = callback; };
+  const host = new NiaTeamsHost(ctx, bridge); t.after(() => host.close());
+  const tool = { name: 'future_tool', description: 'Future tool', inputSchema: { type: 'object', properties: { value: { type: 'string' } } }, deferLoading: true };
+  f.readyOverrides = { tools: [...contract.tools, tool] };
+  await bridge.start(); if (inject) inject(ctx);
+  assert.ok(ctx.toolDefinitions.has(tool.name));
+  const definition = ctx.toolDefinitions.get(tool.name).definition;
+  assert.deepEqual(definition.parameters, tool.inputSchema);
+  f.send(message()); await until(() => ctx.calls.followup.length === 1);
+  const agent = ctx.agents.get(agentThreadId), stop = new AbortController();
+  f.handleRpc = (frame, ws) => {
+    if (frame.method !== 'tool.call' || frame.params.name !== tool.name) return false;
+    ws.send(JSON.stringify({ type: 'rpc.response', protocolVersion: 3, requestId: frame.requestId, ok: true, result: { content: '{"ready":true}' } })); return true;
+  };
+  const result = await definition.execute({ value: 'x' }, { agent, callId: 'future-call', signal: stop.signal });
+  assert.equal(result, '{"ready":true}'); assert.deepEqual(definition.output.render({}, result), [{ type: 'text', text: '{"ready":true}' }]);
+  assert.equal(await ctx.emit('approval/request', { agent, toolName: tool.name, signal: stop.signal }, async () => 'fallback'), 'allowed-once');
+  assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
+  const rpc = f.rpcs.find(r => r.params.name === tool.name); assert.equal(rpc.params.toolCallId, 'future-call'); assert.deepEqual(rpc.params.arguments, { value: 'x' });
+  f.readyOverrides = { tools: [{ ...tool, name: 'replacement' }] }; f.socket.close();
+  await until(() => ctx.toolDefinitions.has('replacement') && !ctx.toolDefinitions.has(tool.name));
+  assert.equal(ctx.toolDefinitions.has('send_message'), false);
+  await host.close(); assert.equal(ctx.toolDefinitions.size, 0);
 });
