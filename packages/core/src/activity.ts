@@ -11,7 +11,7 @@ export class ActivityLease {
   private timer?: ReturnType<typeof setInterval>;
   private readonly off: () => void;
   private closed = false;
-  constructor(private readonly bridge: Pick<BridgeClient, 'rpc' | 'onReady'>, private readonly options: ActivityLeaseOptions = {}) {
+  constructor(private readonly bridge: Pick<BridgeClient, 'rpc' | 'onReady'> & { isReady?: () => boolean }, private readonly options: ActivityLeaseOptions = {}) {
     this.off = bridge.onReady(() => { for (const [key, entry] of this.entries) void this.send(key, entry); });
   }
   record(key: string, sessionId: string, value: ActiveActivity, signal?: AbortSignal): number | undefined {
@@ -35,6 +35,7 @@ export class ActivityLease {
   }
   private send(key: string, entry: Entry): Promise<void> {
     if (this.entries.get(key)?.revision !== entry.revision || entry.controller.signal.aborted) return Promise.resolve();
+    if (this.bridge.isReady?.() === false) return Promise.resolve();
     if (entry.pending) return entry.pending;
     const signal = AbortSignal.any([entry.controller.signal, AbortSignal.timeout(this.options.rpcTimeoutMs ?? 5000)]);
     entry.pending = (async () => {

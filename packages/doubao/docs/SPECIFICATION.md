@@ -32,17 +32,17 @@ One foreground child imports the real driver's parser and executeHeadless, selec
 ```text
 --platform headless --json sessions create --mode work
   --runtime local --workspace <absolute cwd> --permission AskOnRisk
-  [--model <name>] --wait --timeout 120 -- <prompt>
+  [--model <name>] --wait --timeout 86400 -- <prompt>
 --platform headless --json sessions send <rawConversationId>
   --runtime local --workspace <absolute cwd> --permission AskOnRisk
-  [--model <name>] --wait --timeout 120 -- <prompt>
+  [--model <name>] --wait --timeout 86400 -- <prompt>
 ```
 
 --full-auto uses FullAccess with confirmFullAccess returning true in that invocation. Cloud omits local workspace/permission. The literal -- prevents prompt option injection. No goal mode is automatically selected. The worker never calls main/login/updater; no DOM/webpack task API, sandbox module lookup, model menu or desktop native runtime device identity is needed. HTTP runtime uses its own routing device metadata; receipt handling and stop retain that identity through upstream's receipt store.
 
 Worker onAccepted emits only public conversationId/runId/status. Parent persists the backend namespace early, suppressing persistence after cancellation. Final publication requires matching accepted IDs, status completed and nonempty bounded reply.text. Worker result/error serialization drops upstream error messages, causes, headers, request bodies and recovery details; only whitelisted receipt/status/reply fields cross IPC. Neither stdout nor stderr of the worker is forwarded.
 
-On abort with known IDs, parent independently calls `node <bundled-driver> --platform headless --json sessions stop <rawId> --run <runId> --timeout 15`, keeping the worker's local runtime alive during stop, then terminating that worker with bounded SIGTERM/SIGKILL cleanup. Before receipt, cancellation waits for bounded acceptance (task watchdog 130s). No receipt means stop is unconfirmed; there is no resend. The same stop path handles uncertain/nonterminal failures. A process exit alone is not claimed as remote termination. Native SIGINT/SIGTERM alone has no magic remote-stop guarantee.
+On abort with known IDs, parent independently calls `node <bundled-driver> --platform headless --json sessions stop <rawId> --run <runId> --timeout 15`, keeping the worker's local runtime alive during stop, then terminating that worker with bounded SIGTERM/SIGKILL cleanup. Before receipt, cancellation waits for the remaining acceptance watchdog budget (30 seconds by default, overridden by positive finite `acceptanceTimeoutMs`). JavaScript watchdog delays are capped at 2,147,483,647 ms to avoid Node timer overflow. A valid conversationId/runId receipt clears that watchdog immediately. Active execution has no default parent wall-clock timer; positive finite `promptTimeoutMs`, when explicitly supplied, starts a separate execution watchdog after acceptance and uses the same exact-run stop path on expiry. The bundled driver receives `--timeout 86400` by default (24 hours); explicit execution limits instead supply the rounded-up sum of acceptance and execution budgets in seconds, at least 1 and capped at 2,147,000 seconds to avoid Node timer overflow. No receipt means stop is unconfirmed; there is no resend. The same stop path handles uncertain/nonterminal failures. A process exit alone is not claimed as remote termination. Native SIGINT/SIGTERM alone has no magic remote-stop guarantee.
 
 Namespaces remain work:<id>, doubao:<id>, cli:<id>, headless:<id>. Match only the active backend prefix; foreign/legacy values create fresh conversations. Desktop-auth HTTP execution retains work/doubao prefixes. Shared core owns per-chat persistence and publication semantics.
 
@@ -64,4 +64,4 @@ To notify a member with a native Nia Teams highlight, emit `<mention userId="<us
 
 ## Shared bridge transport
 
-Version 0.3.2 uses core Agent Bridge `protocolVersion: 3`. Doubao has no model tool-calling interface: its existing final-reply publication uses the shared `send_message` queue and `tool.call` envelope. It does not synthesize tool registration or ToolSearch.
+Version 0.3.3 uses core Agent Bridge `protocolVersion: 3`. Doubao has no model tool-calling interface: its existing final-reply publication uses the shared `send_message` queue and `tool.call` envelope. It does not synthesize tool registration or ToolSearch.

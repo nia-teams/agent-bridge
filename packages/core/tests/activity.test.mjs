@@ -62,3 +62,24 @@ test('RPC errors and throwing error callbacks are best effort; close rejects fut
   lease.close(); lease.record('a', 's1', { state: 'waiting' });
   assert.equal(b.ready.size, 0);
 });
+
+test('real BridgeClient skips disconnected renewals and restores live activity immediately on ready', async t => {
+  const { BridgeClient } = await import('../dist/index.js');
+  const { fixture, until, sessionId } = await import('./helpers.mjs');
+  const f = await fixture(t), errors = [];
+  const b = new BridgeClient(f.credentials, { reconnectBaseMs: 5 });
+  const lease = new ActivityLease(b, { intervalMs: 15, rpcTimeoutMs: 25, onError: e => errors.push(e) });
+  t.after(() => { lease.close(); b.close(); });
+  assert.equal(b.isReady(), false); await b.start(); assert.equal(b.isReady(), true);
+  await lease.report('a', sessionId, 'executing', { label: 'working' });
+  f.holdReady = true; f.socket.close(1001, 'transient');
+  await until(() => !b.isReady()); await until(() => f.waitingReady);
+  const rpc = b.rpc.bind(b), attempts = [];
+  t.mock.method(b, 'rpc', (...args) => { attempts.push(args); return rpc(...args); });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(attempts.length, 0); assert.deepEqual(errors, []);
+  f.waitingReady(); await until(() => attempts.length > 0);
+  assert.equal(b.isReady(), true);
+  assert.deepEqual(attempts[0].slice(0, 2), ['thread.activity', { sessionId, state: 'executing', label: 'working' }]);
+  assert.deepEqual(errors, []);
+});

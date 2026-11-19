@@ -426,7 +426,7 @@ Permission card identifiers use the namespace and request binding defined below.
 `ActivityLease` is the shared live-status keeper used by SessionHost, Codex and
 DSH. It renews active `executing` and `waiting` status every 30 seconds (RPC timeout
 5 seconds), including long-running model steps, commands and human questions. A
-ready event immediately restores the current active status after reconnect.
+ready event immediately restores the current active status after reconnect. When the bridge is not ready, renewals skip RPC submission rather than waiting for reconnect. Timeout signals report `Agent Bridge RPC timeout`; other caller aborts report `Agent Bridge RPC aborted`.
 `record` tracks publication activity without another immediate RPC. Hosts record
 the intended state before enqueueing a publication, keeping renewals active during
 a slow send. Its revision gates queued activity synchronization (`isCurrent`), so
@@ -444,7 +444,7 @@ idle publication determine server state, not a delayed RPC response.
 
 ### 4.3 Publication Queue
 
-The queue buffers explicitly published replies (random UUID `toolCallId`) across transient disconnects: FIFO, at most 256 entries / 16 MiB, rejected before admission if full. Individual frames including envelope overhead must fit 512 KiB. Ready events and 2-second transient-error retries flush the queue. Accepted content is not evicted. Send acknowledgments prevent resending content when only activity synchronization fails. A non-retryable RPC error rejects the entry. This is process-local, not durable storage.
+The queue buffers explicitly published replies (random UUID `toolCallId`) across transient disconnects: FIFO, at most 256 entries / 16 MiB, rejected before admission if full. Individual frames including envelope overhead must fit 512 KiB. Ready events and 2-second transient-error retries flush the queue. Accepted content is not evicted. Send acknowledgments prevent resending content when only activity synchronization fails. A non-retryable RPC error rejects the entry. Successful and failed turns enqueue final idle status after pending replies, including the processed `deliveryId` and, on failure, `errorMessage`. Cancellation cleanup uses an independent five-second signal for its best-effort idle RPC. This is process-local, not durable storage.
 
 ## 5. TaskBar Confirmation Token (`_meta["nia/confirmationToken"]`)
 

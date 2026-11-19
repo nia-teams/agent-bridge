@@ -63,6 +63,10 @@ test('desktop create then send persists receipt and returns reply.text without n
   assert.equal(create.at(-1), 'Server policy\n\nhi --full-auto -literal');
   assert.ok(records.some(a => a.includes('send') && a.includes(sessions[0].split(':')[1])));
   for (const args of records) assert.doesNotThrow(() => parseOptions(args));
+  for (const args of records.filter(a => a.includes('--wait'))) {
+    assert.equal(args[args.indexOf('--timeout') + 1], '86400');
+    assert.equal(parseOptions(args).timeoutMs, 86_400_000);
+  }
   assert.equal(records.some(a => a.includes('launch') || a.includes('open') || a.includes('login')), false);
 });
 test('Doubao.app explicit selection, model and full-auto map to local FullAccess using supported driver flags', async t => {
@@ -125,4 +129,76 @@ for (const stale of ['cli:old-native-uuid', 'doubao:1234567890123456789', 'headl
   assert.match(persisted, /^work:\d{12,24}$/);
   assert.ok((await calls()).some(a => a.includes('create')));
   assert.equal((await calls()).some(a => a.includes('send')), false);
+});
+
+test('acceptance and prompt timeout overrides reject nonpositive and nonfinite values before startup', () => {
+  for (const name of ['acceptanceTimeoutMs', 'promptTimeoutMs']) {
+    for (const value of [0, -1, NaN, Infinity, -Infinity]) {
+      assert.throws(() => createDoubaoRunner({ cwd: tmpdir(), [name]: value }), /timeouts must be positive/);
+    }
+  }
+});
+
+test('accepted default execution survives 130 simulated seconds after its acceptance watchdog is cleared', async t => {
+  const { make, calls, context } = await setup(t, 'linux');
+  process.env.NIA_MOCK_WAIT = 'hold';
+  const runner = make(); await runner.ready();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const setTimer = globalThis.setTimeout, delays = [];
+  t.mock.method(globalThis, 'setTimeout', (...args) => { delays.push(args[1]); return setTimer(...args); });
+  const stop = new AbortController(); let accepted, settled = false;
+  const receipt = new Promise(resolve => { accepted = resolve; });
+  const turn = runner(context({ signal: stop.signal, session: async id => accepted(id) }));
+  const outcome = turn.then(() => { settled = true; }, error => { settled = true; return error; });
+  const session = await receipt;
+  assert.deepEqual(delays, [30_000], 'only acceptance is timed by default');
+  t.mock.timers.tick(130_001);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false, 'accepted execution must survive both former two-minute limits');
+  stop.abort(new Error('test cancellation'));
+  assert.match((await outcome).message, /test cancellation/);
+  const records = await calls(), create = records.find(a => a.includes('create'));
+  assert.equal(parseOptions(create).timeoutMs, 86_400_000);
+  const stopped = records.find(a => a.includes('stop'));
+  assert.ok(stopped.includes(session.split(':')[1])); assert.ok(stopped.includes('--run'));
+});
+
+test('unaccepted submission hangs expire at the acceptance budget without persistence, stop, or resend', async t => {
+  const { make, calls, context } = await setup(t, 'linux');
+  let persisted = false;
+  await assert.rejects(make({ acceptanceTimeoutMs: 750 })(context({ prompt: 'unaccepted-hang', session: async () => { persisted = true; } })), /submission acceptance timed out/);
+  assert.equal(persisted, false);
+  const records = await calls();
+  assert.equal(records.filter(a => a.includes('create')).length, 1);
+  assert.equal(records.some(a => a.includes('stop')), false);
+});
+
+test('explicit prompt timeout starts only after acceptance and stops that exact run', async t => {
+  const { make, calls, context } = await setup(t, 'linux');
+  process.env.NIA_MOCK_WAIT = 'hold';
+  let session;
+  await assert.rejects(make({ acceptanceTimeoutMs: 1500, promptTimeoutMs: 40 })(context({ prompt: 'hold-submit', session: async id => { session = id; } })), /^Error: Doubao task timed out; stopping the accepted run if known\.$/);
+  assert.ok(session, '180ms submission must not consume the 40ms post-acceptance budget');
+  const records = await calls(), create = records.find(a => a.includes('create'));
+  assert.equal(parseOptions(create).timeoutMs, 2000);
+  const stopped = records.find(a => a.includes('stop'));
+  assert.ok(stopped.includes(session.split(':')[1])); assert.ok(stopped.includes('--run'));
+});
+
+test('oversized explicit JS watchdogs and driver budget cap safely without immediate timeout or overflow warnings', async t => {
+  const { make, calls, context } = await setup(t, 'linux');
+  const runner = make({ acceptanceTimeoutMs: 3_000_000_000, promptTimeoutMs: 3_000_000_000 });
+  await runner.ready();
+  const warnings = [], delays = [], original = globalThis.setTimeout;
+  const warning = value => { if (value.name === 'TimeoutOverflowWarning') warnings.push(value); };
+  process.on('warning', warning); t.after(() => process.off('warning', warning));
+  t.mock.method(globalThis, 'setTimeout', (...args) => { delays.push(args[1]); return original(...args); });
+  await runner(context({ prompt: 'hold-submit' }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(delays.slice(0, 2), [2_147_483_647, 2_147_483_647]);
+  assert.deepEqual(warnings, []);
+  const args = (await calls()).find(a => a.includes('create'));
+  assert.equal(args[args.indexOf('--timeout') + 1], '2147000');
+  assert.equal(parseOptions(args).timeoutMs, 2_147_000_000);
+  assert.ok(parseOptions(args).timeoutMs + 1000 < 2_147_483_647);
 });

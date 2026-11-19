@@ -55,7 +55,7 @@ export class AgyRunner {
         void client.close().finally(() => this.children.delete(client));
       };
       try {
-        const result = await client.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.2' } });
+        const result = await client.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.3' } });
         if (result.protocolVersion !== 1) throw new Error('Unsupported ACP protocol version');
         return client;
       } catch (error) { await client.close(); throw error; }
@@ -68,10 +68,12 @@ export class AgyRunner {
     let client: AcpClient | undefined, sid: string | undefined;
     let revoke: (() => void) | undefined;
     let cancelTimer: ReturnType<typeof setTimeout> | undefined;
+    let promptTimer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     const abort = () => {
       const owned = client ?? this.client;
       if (sid && owned?.available) { try { owned.notify('session/cancel', { sessionId: sid }); } catch {} }
-      cancelTimer = setTimeout(() => { void (owned ?? client ?? this.client)?.close(); }, 2000);
+      cancelTimer ??= setTimeout(() => { void (owned ?? client ?? this.client)?.close(); }, 2000);
     };
     context.signal.addEventListener('abort', abort, { once: true });
     try {
@@ -101,11 +103,19 @@ export class AgyRunner {
       if (this.options.model) await client.request('session/set_model', { sessionId: sid, modelId: this.options.model });
       context.signal.throwIfAborted();
       active.prompting = true;
-      const completion = await client.request('session/prompt', { sessionId: sid, prompt: [{ type: 'text', text: context.prompt }] }, this.options.promptTimeoutMs ?? 600_000);
+      if (this.options.promptTimeoutMs !== undefined) {
+        promptTimer = setTimeout(() => { timedOut = true; abort(); }, Math.min(2_147_483_647, this.options.promptTimeoutMs));
+      }
+      const completion = await client.request('session/prompt', { sessionId: sid, prompt: [{ type: 'text', text: context.prompt }] }, null);
+      if (timedOut) throw new Error('ACP request timeout: session/prompt');
       context.signal.throwIfAborted();
       if (completion.stopReason !== 'end_turn') throw new Error(`ACP turn did not complete: ${String(completion.stopReason)}`);
       return;
+    } catch (error) {
+      if (timedOut) throw new Error('ACP request timeout: session/prompt');
+      throw error;
     } finally {
+      if (promptTimer) clearTimeout(promptTimer);
       context.signal.removeEventListener('abort', abort);
       if (cancelTimer) clearTimeout(cancelTimer);
       revoke?.();

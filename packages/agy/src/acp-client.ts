@@ -7,7 +7,7 @@ export class AcpRpcError extends Error {
   constructor(readonly code: number, message: string) { super(message); this.name = 'AcpRpcError'; }
 }
 export const isObject = (value: unknown): value is JsonObject => value !== null && typeof value === 'object' && !Array.isArray(value);
-interface Pending { resolve(value: JsonObject): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
+interface Pending { resolve(value: JsonObject): void; reject(error: Error): void; timer?: ReturnType<typeof setTimeout> }
 
 /** One ACP child generation; server requests and client responses use independent ID namespaces. */
 export class AcpClient {
@@ -73,10 +73,10 @@ export class AcpClient {
     if (this.stopped || this.child.stdin.destroyed) throw new Error('ACP child is unavailable');
     this.child.stdin.write(JSON.stringify(value) + '\n');
   }
-  request(method: string, params: JsonObject, timeoutMs = this.requestTimeoutMs): Promise<JsonObject> {
+  request(method: string, params: JsonObject, timeoutMs: number | null = this.requestTimeoutMs): Promise<JsonObject> {
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.fail(new Error(`ACP request timeout: ${method}`)), timeoutMs);
+      const timer = timeoutMs === null ? undefined : setTimeout(() => this.fail(new Error(`ACP request timeout: ${method}`)), Math.min(2_147_483_647, timeoutMs));
       this.pending.set(id, { resolve, reject, timer });
       try { this.write({ jsonrpc: '2.0', id, method, params }); }
       catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }

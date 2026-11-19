@@ -36,10 +36,16 @@ function validPush(value: Record<string, unknown>, teamId: string): value is Rec
   }
 }
 
+function rpcAbortError(signal: AbortSignal): Error {
+  const timeout = signal.reason instanceof Error && signal.reason.name === 'TimeoutError';
+  return new Error(timeout ? 'Agent Bridge RPC timeout' : 'Agent Bridge RPC aborted', { cause: signal.reason });
+}
+
 /** One host connection. Call start after installing push handlers; close is terminal. */
 export class BridgeClient {
   private contract?: BridgeContract;
   getContract(): BridgeContract | undefined { return this.contract; }
+  isReady(): boolean { return this.ready && this.socket?.readyState === WebSocket.OPEN; }
   private socket?: WebSocket;
   private verifier?: WorkloadOidcVerifier;
   private readonly lifetime = new AbortController();
@@ -193,7 +199,7 @@ export class BridgeClient {
   }
   private waitUntilReady(signal?: AbortSignal): Promise<void> {
     if (this.lifetime.signal.aborted) return Promise.reject(this.lifetime.signal.reason);
-    if (signal?.aborted) return Promise.reject(signal.reason);
+    if (signal?.aborted) return Promise.reject(rpcAbortError(signal));
     if (this.ready && this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const finish = (error?: unknown): void => {
@@ -203,7 +209,7 @@ export class BridgeClient {
         if (error !== undefined) reject(error); else resolve();
       };
       const off = this.onReady(() => finish());
-      const aborted = (): void => finish(new Error('Agent Bridge RPC aborted', { cause: signal?.reason }));
+      const aborted = (): void => finish(rpcAbortError(signal!));
       const closed = (): void => finish(this.lifetime.signal.reason);
       const timer = setTimeout(() => finish(new Error('Agent Bridge ready timeout')), this.options.rpcTimeoutMs ?? 30_000);
       signal?.addEventListener('abort', aborted, { once: true });
@@ -214,7 +220,7 @@ export class BridgeClient {
     // Wait for the handshake when reconnecting. Never replay an RPC already sent:
     // only the publication owner can safely retry with its idempotency key.
     await this.waitUntilReady(signal);
-    signal?.throwIfAborted();
+    if (signal?.aborted) throw rpcAbortError(signal);
     this.lifetime.signal.throwIfAborted();
     const requestId = randomUUID();
     return new Promise((resolve, reject) => {
@@ -222,7 +228,7 @@ export class BridgeClient {
         clearTimeout(timer); signal?.removeEventListener('abort', aborted); this.pending.delete(requestId);
         if (error) reject(error); else resolve(result ?? {});
       };
-      const aborted = (): void => finish(new Error('Agent Bridge RPC aborted', { cause: signal?.reason }));
+      const aborted = (): void => finish(rpcAbortError(signal!));
       const timer = setTimeout(() => finish(new Error('Agent Bridge RPC timeout')), this.options.rpcTimeoutMs ?? 30_000);
       this.pending.set(requestId, { resolve: result => finish(undefined, result), reject: error => finish(error) });
       signal?.addEventListener('abort', aborted, { once: true });

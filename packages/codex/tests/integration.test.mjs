@@ -38,7 +38,7 @@ test('stdio initialize → thread/start → turn/start → private agentMessage 
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
   const entries = await log();
   assert.deepEqual(entries.slice(0, 2).map(m => m.method), ['initialize', 'initialized']);
-  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.3.2' });
+  assert.deepEqual(entries[0].params.clientInfo, { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.3.3' });
   assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length, 0);
   await host.message(message('second hold'));
   assert.equal((await log()).filter(m => m.method === 'thread/resume').length, 1);

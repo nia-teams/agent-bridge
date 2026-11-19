@@ -15,7 +15,7 @@ export class McpRelay {
       if (req.method !== 'POST' || req.url !== '/tool') { reply(404, { error: 'Not found' }); return; }
       const context = this.scopes.get((req.headers.authorization ?? '').replace(/^Bearer /, ''));
       if (!context || context.signal.aborted) { reply(403, { error: 'Inactive tool scope' }); return; }
-      void this.handle(req, context, res).catch(() => reply(400, { error: 'GroupChat tool failed' }));
+      void this.handle(req, context, res).catch(error => reply(400, { error: error instanceof Error ? error.message : 'GroupChat tool failed' }));
     });
     this.server = server;
     try { await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => { server.removeListener('error', reject); resolve(); }); }); }
@@ -50,7 +50,11 @@ export async function callRelay(name: string, args: unknown, url = process.env.N
   const endpoint = new URL(url);
   if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || endpoint.pathname !== '/tool' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid MCP loopback endpoint');
   const response = await fetch(endpoint, { method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ name, arguments: args }), signal: AbortSignal.timeout(120_000) });
-  if (!response.ok) throw new Error('GroupChat tool unavailable');
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => undefined);
+    const parsedError = isObject(body) ? body.error : undefined;
+    throw new Error(typeof parsedError === 'string' && parsedError ? parsedError : 'GroupChat tool unavailable');
+  }
   const result: unknown = await response.json();
   if (!isObject(result)) throw new Error('Invalid GroupChat tool response');
   if (!isObject(result.result) || typeof result.result.content !== 'string') throw new Error('Invalid tool content');

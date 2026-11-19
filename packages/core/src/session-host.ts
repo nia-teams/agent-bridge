@@ -6,7 +6,7 @@ import { PublicationQueue } from './publications.js';
 import { ThreadMapStore } from './state.js';
 import { IdleSleepGuard } from './process.js';
 import { resolveThreadPrompt } from './format.js';
-export type SessionBridge = Pick<BridgeClient, 'getContract' | 'credentials' | 'rpc' | 'onReady' | 'onThreadMessage' | 'onThreadCancel' | 'onCardAction' | 'verifyCardApproval'>;
+export type SessionBridge = Pick<BridgeClient, 'getContract' | 'credentials' | 'rpc' | 'onReady' | 'onThreadMessage' | 'onThreadCancel' | 'onCardAction' | 'verifyCardApproval'> & { isReady?: () => boolean };
 export interface PermissionDecision { behavior: 'allow' | 'deny'; updatedInput?: Record<string, unknown>; message?: string }
 export interface ToolCallResult { content: string; isError?: boolean }
 export interface TurnContext {
@@ -53,7 +53,7 @@ export class SessionHost {
     this.lease.clear(frame.agentThreadId);
     // Progress is best-effort telemetry, not a prerequisite for SDK execution.
     // Final publication/idle ordering remains owned by PublicationQueue.
-    await this.bridge.rpc('thread.activity', { sessionId: frame.sessionId, state, ...(state === 'idle' ? { deliveryId: frame.deliveryId } : {}), ...(label ? { label } : {}), ...(errorMessage ? { errorMessage } : {}) }, AbortSignal.any([active.controller.signal, AbortSignal.timeout(5000)])).catch(error => this.report(error));
+    await this.bridge.rpc('thread.activity', { sessionId: frame.sessionId, state, ...(state === 'idle' ? { deliveryId: frame.deliveryId } : {}), ...(label ? { label } : {}), ...(errorMessage ? { errorMessage } : {}) }, AbortSignal.timeout(5000)).catch(error => this.report(error));
   }
   message(frame: ThreadMessage): void {
     if (this.closed) throw new Error('Session host is closed');
@@ -124,7 +124,16 @@ export class SessionHost {
         idleSynced = true;
       } catch (error) {
         active.finishing = true;
-        if (!signal.aborted) { idleSynced = true; this.report(error); await this.activity(thread, frame, active, 'idle', undefined, String(error)).catch(e => this.report(e)); }
+        if (!signal.aborted) {
+          this.report(error); this.lease.clear(frame.agentThreadId);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          try {
+            await this.publications.enqueue({ niaSessionId: frame.sessionId, toolCallId: `turn:${frame.agentThreadId}:${active.id}`, content: undefined, activityAfter: { state: 'idle', deliveryId: frame.deliveryId, errorMessage }, shouldSyncActivity: () => thread.active === active && thread.frame.sessionId === frame.sessionId, signal });
+            idleSynced = true;
+          } catch (queueError) {
+            if (!signal.aborted) { idleSynced = true; this.report(queueError); await this.activity(thread, frame, active, 'idle', undefined, errorMessage).catch(e => this.report(e)); }
+          }
+        }
       } finally {
         this.lease.clear(frame.agentThreadId);
         active.controller.abort(); thread.question = undefined;

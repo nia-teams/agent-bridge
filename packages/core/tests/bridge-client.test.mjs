@@ -178,3 +178,15 @@ for (const deferLoading of ['true', 1, null, {}]) test(`invalid loading hint ${J
   const bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 60000 }); t.after(() => bridge.close());
   await assert.rejects(bridge.start(), /4401/); assert.equal(bridge.getContract(), undefined);
 });
+
+for (const ready of [false, true]) test(`RPC signal timeout differs from caller abort (ready=${ready})`, async t => {
+  const f = await fixture(t), b = new BridgeClient(f.credentials);
+  t.after(() => b.close());
+  if (ready) { await b.start(); f.holdRpc.add('thread.activity'); }
+  const params = { sessionId, state: 'executing' };
+  await assert.rejects(b.rpc('thread.activity', params, AbortSignal.timeout(20)), e => e.message === 'Agent Bridge RPC timeout' && e.cause?.name === 'TimeoutError');
+  const stop = new AbortController(), reason = new Error('cancelled');
+  const pending = b.rpc('thread.activity', params, stop.signal); stop.abort(reason);
+  await assert.rejects(pending, e => e.message === 'Agent Bridge RPC aborted' && e.cause === reason);
+  await assert.rejects(b.rpc('thread.activity', params, stop.signal), e => e.message === 'Agent Bridge RPC aborted' && e.cause === reason);
+});

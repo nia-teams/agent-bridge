@@ -14,6 +14,7 @@ export type DoubaoBackend = Exclude<DoubaoPlatform, 'auto'>;
 export interface DoubaoOptions {
   cwd: string; model?: string; fullAuto?: boolean; doubaoBin?: string;
   platform?: DoubaoPlatform; runtime?: 'local' | 'cloud'; restartApp?: boolean; interactive?: boolean;
+  acceptanceTimeoutMs?: number; promptTimeoutMs?: number;
 }
 interface Result {
   conversationId?: string; runId?: string; status?: string;
@@ -69,6 +70,7 @@ function command(binary: string, selected: DoubaoBackend, args: string[], cwd: s
 
 /** Startup probes are shared once per runner; turns never launch/restart/open the app. */
 export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready(): Promise<void> } {
+  for (const value of [options.acceptanceTimeoutMs, options.promptTimeoutMs]) if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw new Error('Doubao timeouts must be positive');
   let ready: Promise<void> | undefined;
   let selected: DoubaoBackend, binary: string, runtime: 'local' | 'cloud';
   const initialize = async () => {
@@ -124,25 +126,31 @@ export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready
       cwd: options.cwd, execPath: process.execPath, stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
       env: { ...process.env, DOUBAO_CLI_DISABLE_AUTO_UPDATE: '1', ...(cookie ? { DOUBAO_HEADLESS_COOKIE: cookie } : {}) },
     });
-    const capture = (result?: Result) => {
-      if (id(result?.conversationId) && id(result?.runId)) {
-        if (conversationId && (conversationId !== result.conversationId || runId !== result.runId)) throw new Error('Doubao returned a mismatched run receipt.');
-        if (resume && result.conversationId !== resume) throw new Error('Doubao returned a different conversation; refusing cross-chat publication.');
-        if (!conversationId && !context.signal.aborted) {
-          persist = context.session(`${selected}:${result.conversationId}`);
-          void persist.catch(() => {});
-        }
-        conversationId = result.conversationId; runId = result.runId;
-      }
-    };
     let abort = () => {};
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let acceptanceTimer: ReturnType<typeof setTimeout> | undefined;
+    let promptTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = await new Promise<Result>((resolveResult, reject) => {
         let receivedResult = false;
+        const capture = (result?: Result) => {
+          if (id(result?.conversationId) && id(result?.runId)) {
+            if (conversationId && (conversationId !== result.conversationId || runId !== result.runId)) throw new Error('Doubao returned a mismatched run receipt.');
+            if (resume && result.conversationId !== resume) throw new Error('Doubao returned a different conversation; refusing cross-chat publication.');
+            if (!conversationId && !context.signal.aborted) {
+              persist = context.session(`${selected}:${result.conversationId}`);
+              void persist.catch(() => {});
+            }
+            const newlyAccepted = !conversationId;
+            conversationId = result.conversationId; runId = result.runId;
+            clearTimeout(acceptanceTimer);
+            if (newlyAccepted && !context.signal.aborted && options.promptTimeoutMs !== undefined) {
+              promptTimer = setTimeout(() => reject(new Error('Doubao task timed out; stopping the accepted run if known.')), Math.min(2_147_483_647, options.promptTimeoutMs));
+            }
+          }
+        };
         abort = () => { if (conversationId && runId) reject(context.signal.reason); };
         context.signal.addEventListener('abort', abort, { once: true });
-        timer = setTimeout(() => reject(new Error('Doubao task timed out; stopping the accepted run if known.')), 130_000);
+        acceptanceTimer = setTimeout(() => reject(new Error('Doubao submission acceptance timed out; no accepted run receipt received.')), Math.min(2_147_483_647, options.acceptanceTimeoutMs ?? 30_000));
         worker.on('message', (message: any) => {
           try {
             capture(message?.result);
@@ -154,9 +162,11 @@ export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready
         worker.once('error', () => reject(new Error('Unable to start the bundled Doubao headless task worker.')));
         worker.once('exit', () => { if (!receivedResult) reject(new Error('Doubao task worker exited before completing its run.')); });
         worker.once('disconnect', () => { /* Result IPC precedes a normal disconnect. */ });
+        // The bundled driver uses Node timers internally: keep its total budget below int32 overflow.
+        const timeoutSeconds = options.promptTimeoutMs !== undefined ? Math.min(2_147_000, Math.max(1, Math.ceil((options.acceptanceTimeoutMs ?? 30_000) / 1000 + options.promptTimeoutMs / 1000))) : 86_400;
         const args = ['sessions', resume ? 'send' : 'create', ...(resume ? [resume] : ['--mode', 'work']),
           '--runtime', runtime, ...(runtime === 'local' ? ['--workspace', options.cwd, '--permission', options.fullAuto ? 'FullAccess' : 'AskOnRisk'] : []),
-          ...(options.model ? ['--model', options.model] : []), '--wait', '--timeout', '120', '--', (resume ? context.prompt : `${context.systemPrompt}\n\n${context.prompt}`)];
+          ...(options.model ? ['--model', options.model] : []), '--wait', '--timeout', String(timeoutSeconds), '--', (resume ? context.prompt : `${context.systemPrompt}\n\n${context.prompt}`)];
         worker.send({ args, fullAuto: Boolean(options.fullAuto) }, error => { if (error) reject(new Error('Unable to initialize Doubao task worker.')); });
       });
       await persist;
@@ -170,7 +180,7 @@ export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready
       await context.send(result.reply.text.trim());
       return;
     } finally {
-      if (timer) clearTimeout(timer);
+      clearTimeout(acceptanceTimer); clearTimeout(promptTimer);
       context.signal.removeEventListener('abort', abort);
       // Keep the local runtime connected while the independently authenticated
       // stop command terminates this accepted run, then close its worker.

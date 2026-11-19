@@ -174,3 +174,86 @@ test('parallel SDK progress supersedes a pending send activity revision without 
   assert.ok(f.rpcs.slice(offset).filter(r => r.method === 'thread.activity').every(r => r.params.label === 'Running newer command…'));
   release(); await until(() => context.signal.aborted);
 });
+
+test('thread.cancel sends idle with an independent non-aborted signal', async t => {
+  const f = await fixture(t), bridge = new BridgeClient(f.credentials), errors = [];
+  let context;
+  const host = new SessionHost(bridge, async c => {
+    context = c;
+    await new Promise(resolve => c.signal.addEventListener('abort', resolve, { once: true }));
+  }, { configDir: f.dir, runtime: 'Test', approvalTool: 'test', onError: e => errors.push(e) });
+  t.after(async () => { await host.close(); bridge.close(); });
+  await host.start(); await bridge.start();
+  const frame = message(); f.send(frame);
+  await until(() => context);
+  f.send({ ...frame, type: 'thread.cancel', deliveryId: 'cancel-delivery', reason: 'user_aborted' });
+  await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.state === 'idle'));
+  assert.equal(context.signal.aborted, true);
+  const idle = f.rpcs.find(r => r.params.state === 'idle');
+  assert.equal(idle.params.deliveryId, frame.deliveryId);
+  assert.deepEqual(errors, []);
+});
+
+test('runtime failure during 1001 reconnect queues error idle behind pending send_message', async t => {
+  const f = await fixture(t), bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 10, rpcTimeoutMs: 10000 });
+  const errors = []; let fail, sending;
+  const failure = new Promise(resolve => { fail = resolve; });
+  f.handleRpc = frame => frame.method === 'tool.call' && frame.params.name === 'send_message';
+  const host = new SessionHost(bridge, async c => {
+    sending = c.send('reply before failure');
+    void sending.catch(() => {});
+    await failure; throw new Error('runtime disconnected');
+  }, { configDir: f.dir, runtime: 'Test', approvalTool: 'test', onError: e => errors.push(e) });
+  t.after(async () => { await host.close(); bridge.close(); });
+  await host.start(); await bridge.start();
+  const frame = message(); host.message(frame);
+  await until(() => f.rpcs.some(r => r.params.name === 'send_message'));
+  const first = f.rpcs.find(r => r.params.name === 'send_message');
+  f.holdReady = true; f.socket.close(1001, 'transient disconnect');
+  await until(() => !bridge.isReady());
+  fail(); await until(() => errors.some(e => e.message === 'runtime disconnected'));
+  await until(() => f.waitingReady);
+  // Exceed the old one-shot idle's five-second signal deadline.
+  await new Promise(resolve => setTimeout(resolve, 5200));
+  assert.equal(f.rpcs.filter(r => r.params.state === 'idle').length, 0);
+  f.handleRpc = undefined;
+  const offset = f.rpcs.length; f.waitingReady();
+  await until(() => f.rpcs.some(r => r.params.state === 'idle'));
+  await sending;
+  const delivered = f.rpcs.slice(offset);
+  assert.deepEqual(delivered.map(r => r.method === 'tool.call' ? r.params.name : r.params.state), ['send_message', 'idle']);
+  assert.equal(delivered[0].params.toolCallId, first.params.toolCallId);
+  assert.deepEqual(delivered[1].params, { sessionId: frame.sessionId, state: 'idle', deliveryId: frame.deliveryId, errorMessage: 'runtime disconnected' });
+  assert.deepEqual(errors.map(e => e.message), ['runtime disconnected']);
+});
+
+for (const cancelAfterReady of [false, true]) test(`cancel during queued error idle still delivers cleanup idle (reconnected=${cancelAfterReady})`, async t => {
+  const f = await fixture(t), bridge = new BridgeClient(f.credentials, { reconnectBaseMs: 5 });
+  const errors = []; let context, fail;
+  const failure = new Promise(resolve => { fail = resolve; });
+  const host = new SessionHost(bridge, async c => {
+    context = c; await failure; throw new Error('runtime failed before cancellation');
+  }, { configDir: f.dir, runtime: 'Test', approvalTool: 'test', onError: e => errors.push(e) });
+  t.after(async () => { await host.close(); bridge.close(); });
+  await host.start(); await bridge.start();
+  const frame = message(); host.message(frame); await until(() => context);
+  f.holdReady = true; f.socket.close(1001, 'transient disconnect');
+  await until(() => !bridge.isReady()); await until(() => f.waitingReady);
+  fail(); await until(() => errors.length === 1);
+  assert.equal(context.signal.aborted, false);
+  if (cancelAfterReady) {
+    // Leave error-idle's RPC pending after reconnect so cancellation races its acknowledgment.
+    f.holdRpc.add('thread.activity'); f.waitingReady();
+    await until(() => f.rpcs.some(r => r.params.errorMessage));
+    f.holdRpc.delete('thread.activity');
+  }
+  const offset = f.rpcs.length;
+  host.cancel({ ...frame, type: 'thread.cancel', reason: 'user_aborted' });
+  assert.equal(context.signal.aborted, true);
+  if (!cancelAfterReady) f.waitingReady();
+  await until(() => f.rpcs.slice(offset).some(r => r.params.state === 'idle'));
+  const idle = f.rpcs.slice(offset).find(r => r.params.state === 'idle');
+  assert.deepEqual(idle.params, { sessionId: frame.sessionId, state: 'idle', deliveryId: frame.deliveryId });
+  await host.close();
+  assert.deepEqual(errors.map(e => e.message), ['runtime failed before cancellation']);
+});

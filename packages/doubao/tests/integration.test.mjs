@@ -37,7 +37,7 @@ test('Doubao JSON receipt, clean assistant reply, durable conversation resume an
   assert.equal(calls.filter(a => a.includes('status')).length, 1);
   assert.equal(calls.filter(a => a.includes('create')).length, 1);
   assert.ok(calls.some(a => a.includes('send') && a.includes(first.split(':')[1])));
-  assert.ok(calls.filter(a => a.includes('--wait')).every(a => !a.includes('--run')));
+  assert.ok(calls.filter(a => a.includes('--wait')).every(a => !a.includes('--run') && a[a.indexOf('--timeout') + 1] === '86400'));
   assert.equal(calls.some(a => a.includes('open') || a.includes('login') || a.includes('-p')), false);
 });
 test('Doubao cancellation stops the pinned accepted remote run, suppresses stale final, then resumes', async t => {

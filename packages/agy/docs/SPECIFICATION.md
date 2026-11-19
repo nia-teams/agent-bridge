@@ -14,12 +14,12 @@ Executable precedence: explicit `agyBin` / CLI `--agy-bin`, `AGY_BIN`, `agy` on 
 
 stdin/stdout carry newline-delimited JSON-RPC 2.0. stderr is diagnostic output. The client uses numeric monotonically increasing IDs; server request IDs may be strings or numbers. An inbound `method` denotes a server request/notification even if its ID matches a pending client request. Replies preserve the server ID's type. Unknown server requests receive `-32601`.
 
-Client control requests default to 30 seconds; prompts default to 600 seconds. Constructor options `requestTimeoutMs` / `promptTimeoutMs` accept positive overrides. Timeout, malformed framing, oversized frames, or process exit reject all pending requests in that process generation. Raw ACP frames are limited to 4 MiB; assistant text chunks are ignored, not accumulated. A later turn may start a new child; a failed prompt is not replayed.
+Client control requests default to 30 seconds; prompts have no default wall-clock timeout, including while streaming or awaiting approval. Constructor options `requestTimeoutMs` / `promptTimeoutMs` accept positive overrides; JavaScript watchdog delays are capped at 2,147,483,647 ms to avoid Node timer overflow. When an explicit `promptTimeoutMs` expires, the runner sends `session/cancel` for only that session and fails its turn with `ACP request timeout: session/prompt`, even if the child cooperatively returns `cancelled`. The child is terminated only if the prompt does not settle within two seconds after cancellation; that escalation timer is cleared when the prompt settles. Control-request timeout, malformed framing, oversized frames, stdin error, or process exit reject all pending requests in that process generation. Raw ACP frames are limited to 4 MiB; assistant text chunks are ignored, not accumulated. A later turn may start a new child; a failed prompt is not replayed.
 
 ## 2. Initialization
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"nia-agy","version":"0.3.2"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"nia-agy","version":"0.3.3"}}}
 ```
 
 The response must contain `result.protocolVersion === 1`. `agentCapabilities`, `agentInfo`, and `authMethods` describe upstream capabilities; authentication remains local to agy. No Codex-style `initialized` notification is added.

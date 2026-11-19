@@ -31,7 +31,7 @@ test('ACP initialize, private streaming text/thoughts, durable resume and one pe
   const e = await events();
   assert.equal(e.filter(e => e.kind === 'spawn').length, 1);
   const init = e.find(e => e.method === 'initialize');
-  assert.deepEqual(init.params, { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.2' } });
+  assert.deepEqual(init.params, { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'nia-agy', version: '0.3.3' } });
   const fresh = e.find(e => e.method === 'session/new'); assert.equal(fresh.params.systemPromptAppend, contract.systemPrompt);
   assert.ok(fresh.params.mcpServers[0].env.every(e => typeof e.name === 'string'));
   const saved = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'));
@@ -96,7 +96,7 @@ for (const ignore of [false,true]) test(`abort sends cancel, prevents stale publ
   assert.ok(ready, 'peer must record the active prompt before cancellation');
   host.cancel({ ...message(), type: 'thread.cancel', reason: 'user_aborted' });
   host.message(message('next'));
-  await until(() => idles(f).length >= 1, 'post-abort reply', 7000);
+  await until(() => idles(f).length >= 2, 'cancel idle and post-abort reply', 7000);
   assert.equal(sends(f).length, 0);
   const e = await events(); assert.ok(e.some(e => e.method === 'session/cancel'));
   assert.equal(e.filter(e => e.kind === 'spawn').length, ignore ? 2 : 1);
@@ -210,4 +210,35 @@ test('AGY registers every server tool normally and preserves formatted content w
   host.message(message('nia permission')); await until(() => idles(f).length === 2);
   assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
   assert.deepEqual(errors, []);
+});
+
+test('explicit prompt timeout cancels only its session and a concurrent turn survives on the shared child', async t => {
+  const { f, host, events, errors } = await setup(t, { promptTimeoutMs: 2000 });
+  host.message(message('hold until timeout'));
+  let records;
+  for (let i = 0; i < 400; i++) {
+    records = await events();
+    if (records.some(e => e.method === 'session/prompt')) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.ok(records.some(e => e.method === 'session/prompt'));
+  // Stagger deadlines so the concurrent prompt remains pending when the first expires.
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  const group = 'abcdef123456abcdef123456';
+  host.message({ ...message('permission'), groupChatId: group, agentThreadId: stableExternalAgentThreadId(group, teamId), sessionId: 'abcdefabcdefabcdefabcdef' });
+  await until(() => f.rpcs.some(r => r.method === 'card.upsert'));
+  await until(() => errors.some(e => e.message === 'ACP request timeout: session/prompt'));
+  const card = f.rpcs.find(r => r.method === 'card.upsert');
+  await f.confirm(card);
+  await until(() => idles(f).length === 2);
+  const e = await events(), prompts = e.filter(e => e.method === 'session/prompt');
+  assert.equal(e.filter(e => e.kind === 'spawn').length, 1);
+  assert.deepEqual(e.filter(e => e.method === 'session/cancel').map(e => e.params.sessionId), [prompts[0].params.sessionId]);
+  assert.equal(errors.length, 1);
+  assert.equal(idles(f).filter(r => r.params.errorMessage).length, 1);
+  // The two-second escalation must have been cleared: the same child handles a later turn.
+  await new Promise(resolve => setTimeout(resolve, 2100));
+  host.message(message('after cooperative timeout'));
+  await until(() => idles(f).length === 3);
+  assert.equal((await events()).filter(e => e.kind === 'spawn').length, 1);
 });

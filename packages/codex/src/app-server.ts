@@ -47,7 +47,7 @@ export class AppServer {
         }
       } catch (error) { fail(new Error('Invalid Codex JSONL', { cause: error })); child.kill(); }
     });
-    await this.request('initialize', { clientInfo: { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.3.2' }, capabilities: { experimentalApi: true } });
+    await this.request('initialize', { clientInfo: { name: 'nia-teams-codex-bridge', title: 'Nia Teams Codex Bridge', version: '0.3.3' }, capabilities: { experimentalApi: true } });
     this.notify('initialized', {});
   }
   private write(value: unknown): void {

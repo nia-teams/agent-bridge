@@ -13,6 +13,7 @@ export async function executeHeadless(options, { confirmFullAccess }) {
   if (options.permission === 'FullAccess' && !fullAccess) throw new Error('No full access consent');
   const conversationId = options.args[1] === 'send' ? options.args[2] : String(Date.now()) + String(randomInt(1000000)).padStart(6, '0');
   const runId = String(Date.now()) + String(randomInt(1000000)).padStart(6, '0');
+  if (prompt.includes('unaccepted-hang')) return new Promise(() => { setInterval(() => {}, 1000); });
   if (prompt.includes('hold-submit')) await new Promise(resolve => setTimeout(resolve, 180));
   const accepted = { conversationId, runId, status: 'running' };
   options.onAccepted(accepted);
