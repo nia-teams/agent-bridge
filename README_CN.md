@@ -15,29 +15,33 @@ npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 
-# 2. 检查或配对：将 <nia-cli> 替换为上方对应的 CLI（不保留尖括号）
-<nia-cli> status
-# 仅在首次接入或需要重绑时执行：
-<nia-cli> pair --name 'My Local Agent'
+# 2. 微信扫码接入并启动桥接（将 <nia-cli> 替换为上方对应命令）
+<nia-cli> connect --cwd "/path/to/workspace"
 
-# 3. 启动后台守护进程
+# 也可用浏览器配对已有 Agent：
+# <nia-cli> status
+# 仅在首次接入或需要重绑时执行：
+# <nia-cli> pair --name 'My Local Agent'
+
+# 3. 使用 pair 配对时，另行启动后台守护进程
 # 跨平台后台启动（Windows PowerShell/CMD/Git Bash、macOS、Linux）：
-<nia-cli> start --cwd "/path/to/workspace" --daemon
+# <nia-cli> start --cwd "/path/to/workspace" --daemon
 # 可选：--log-file "/path/to/bridge.log"；默认：<config-dir>/daemon.log
 # 仅 POSIX 的替代方式（不适用于 Windows）：
-nohup <nia-cli> start --cwd "$PWD" > /tmp/nia-agent.log 2>&1 &
+# nohup <nia-cli> start --cwd "$PWD" > /tmp/nia-agent.log 2>&1 &
 
 # DSH 的配对与启动不同（支持 macOS / Linux），改用以下命令：
+# npx --prefix ~/.dsh/profiles/web nia-dsh connect
 # npx --prefix ~/.dsh/profiles/web nia-dsh status
 # npx --prefix ~/.dsh/profiles/web nia-dsh pair --label 'My DSH'
 # nohup dsh web > /tmp/nia-dsh.log 2>&1 &
 ```
 
-`<nia-cli>` 指 `nia-claude`、`nia-codex`、`nia-agy`、`nia-workbuddy`、`nia-doubao` 或 `nia-droid`。不加 `--daemon` 时在前台运行；`--daemon` 由 Node 后台启动，不依赖 `nohup` 或 `/tmp`。已有配对时先检查 `status`，复用目标 Agent 的凭证；DSH 由 Harness 宿主运行，不使用 `nia-dsh start`。
+`<nia-cli>` 指 `nia-claude`、`nia-codex`、`nia-agy`、`nia-workbuddy`、`nia-doubao` 或 `nia-droid`。`start` 不加 `--daemon` 时在前台运行；`--daemon` 由 Node 后台启动，不依赖 `nohup` 或 `/tmp`。已有配对时先检查 `status`，复用目标 Agent 的凭证；DSH 由 Harness 宿主运行，不使用 `nia-dsh start`。
 
 AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `SKILL.md`；各平台的 Skill 提供专属登录检查、配对与启动指引。
 
-邀请码接入见[邀请码接入](./docs/INVITE-CONNECT_CN.md)。
+使用微信扫码接入，或通过群聊邀请链接加入已有群聊，见[微信扫码接入](./docs/WECHAT-CONNECT_CN.md)。
 
 ## 包导航
 
@@ -302,6 +306,6 @@ npm test
 npm run verify:docs
 ```
 
-协议入口：[docs/SPECIFICATION.md](./docs/SPECIFICATION.md)（邀请码接入见 [docs/INVITE-CONNECT_CN.md](./docs/INVITE-CONNECT_CN.md)）。各包的 `dist/**/*.d.ts` 提供接口签名，`skills/` 提供接入方 AI 操作指引；core 的 `examples/` 包含可运行 ESM 配对与消息示例。修改公共契约时同步更新中英文文档、Skill 与测试。
+协议入口：[docs/SPECIFICATION.md](./docs/SPECIFICATION.md)（微信扫码接入见 [docs/WECHAT-CONNECT_CN.md](./docs/WECHAT-CONNECT_CN.md)）。各包的 `dist/**/*.d.ts` 提供接口签名，`skills/` 提供接入方 AI 操作指引；core 的 `examples/` 包含可运行 ESM 配对与消息示例。修改公共契约时同步更新中英文文档、Skill 与测试。
 
 [MIT](./LICENSE) © Nia Teams

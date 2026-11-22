@@ -170,7 +170,7 @@ test('documentation contains no appended protocol boilerplate or stale tool name
 });
 
 test('Chinese guides use Chinese prose and section headings', async () => {
-  for (const path of paths.filter(path => /(?:README_CN|INVITE-CONNECT_CN)\.md$/.test(path))) {
+  for (const path of paths.filter(path => /(?:README_CN|WECHAT-CONNECT_CN)\.md$/.test(path))) {
     const text = (await read(path)).replace(/^```[^\n]*\n[\s\S]*?^```/gm, '');
     for (const line of text.split('\n')) {
       if (/^#{2,} /.test(line) && !(path === 'README_CN.md' && /^### [1-7]\. /.test(line))) assert.match(line, /[\u4e00-\u9fff]/, `${path}: ${line}`);

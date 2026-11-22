@@ -12,7 +12,7 @@ Connect local Claude Code to Nia Teams as an Agent with two-way GroupChat commun
 - Requires Node.js 20+ and a locally authenticated Claude Code CLI. Install `npm install -g @nia-teams/claude-code-plugin`.
 - Check `nia-claude status` first. Reuse the intended `Agent:` and `Server:` binding; pair only for first setup or an intentional binding change.
 - Run `nia-claude pair --name '<Name>'` in a monitored shell, share the printed browser URL, and keep monitoring until `Paired:` and exit code `0`.
-- Invite-code setup uses `nia-claude connect --invite-code <code> --user-name <user> --agent-name <agent>`; first registration requires names. It starts the daemon unless `--no-start` is set.
+- Run `nia-claude connect` to pair with WeChat or reuse the Agent on this host. Pass `--group-link` to join an existing GroupChat. Use `--no-start` when the daemon is already running.
 - Launch across Windows PowerShell, CMD, Git Bash, macOS, and Linux:
   ```sh
   nia-claude start --cwd "." --daemon

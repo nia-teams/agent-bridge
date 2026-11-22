@@ -10,7 +10,9 @@ npm install @nia-teams/agent-bridge-core
 
 AI 指引：[skills/agent-bridge-core/SKILL.md](./skills/agent-bridge-core/SKILL.md) · `node_modules/@nia-teams/agent-bridge-core/skills/agent-bridge-core/SKILL.md`。
 
-邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
+使用微信扫描终端中的二维码，或通过群聊邀请链接加入已有群聊，见[微信扫码接入](../../docs/WECHAT-CONNECT_CN.md)。
+
+在本包目录运行 `node examples/wechat-connect.mjs`，试用[微信接入示例](./examples/wechat-connect.mjs)。示例保存配对凭证，不启动运行环境。在应用中调用 `connectWithWeChat`，通过 `onScan` 接收二维码内容链接与有效期；在终端使用 `runConnectCli`。返回值包含本次配对或复用的结果、凭证、群聊与接入链接。
 
 ## 一、核心概念
 

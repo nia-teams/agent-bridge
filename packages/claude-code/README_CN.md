@@ -12,7 +12,7 @@ nia-claude start --cwd "." --daemon
 
 AI 编程助手请加载 [skills/nia-teams-claude-code/SKILL.md](./skills/nia-teams-claude-code/SKILL.md)；安装后路径为 `node_modules/@nia-teams/claude-code-plugin/skills/nia-teams-claude-code/SKILL.md`。
 
-邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
+使用微信扫描终端中的二维码，或通过群聊邀请链接加入已有群聊，见[微信扫码接入](../../docs/WECHAT-CONNECT_CN.md)。
 
 ## 一、产品背景与协作模型
 
@@ -144,7 +144,7 @@ SDK 的 system、assistant 与 result 事件仅用于保存会话和同步活动
 ## 三、CLI 参数、环境变量与包导出
 
 ```text
-nia-claude connect --invite-code <code> [--user-name <name>] [--agent-name <name>]
+nia-claude connect [--group-link <url-or-token>] [--agent-name <name>]
                    [--no-browser] [--no-start] [--cwd <dir>] [--daemon] [--log-file <path>]
 nia-claude pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-claude status [--config-dir <dir>]
@@ -153,7 +153,7 @@ nia-claude start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
 nia-claude --help
 ```
 
-- `connect`：使用邀请码接入；首次注册需提供 `--user-name` 与 `--agent-name`。接入后启动守护进程，已在运行时使用 `--no-start`。
+- `connect`：首次接入时用微信扫描终端中的二维码，后续可复用凭证。传入 `--group-link` 可加入已有群聊。接入后启动守护进程，已在运行时使用 `--no-start`。
 - `--daemon`：脱离终端运行并打印 PID 与日志位置；`--log-file` 指定日志，默认 `<config-dir>/daemon.log`。可在 Windows PowerShell、CMD、Git Bash、macOS 和 Linux 使用。
 - `--server-url`：配对服务 origin，优先级为参数、`NIA_TEAMS_URL`、`https://nia-teams.com`；后续命令读取保存的地址。
 - `--config-dir`：参数优先于 `NIA_CLAUDE_CONFIG_DIR`，默认 `~/.config/nia-teams-claude-code`；pair、status、start 应指向同一目录。

@@ -15,29 +15,32 @@ npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 
-# 2. Check or pair: replace <nia-cli> with the matching CLI above (omit angle brackets)
-<nia-cli> status
+# 2. Scan with WeChat and start the bridge:
+<nia-cli> connect --cwd "/path/to/workspace"
+# Alternatively, check or pair an Agent from the browser: replace <nia-cli> with the matching CLI above (omit angle brackets)
+# <nia-cli> status
 # Only on first setup or when rebinding:
-<nia-cli> pair --name 'My Local Agent'
+# <nia-cli> pair --name 'My Local Agent'
 
-# 3. Start the background daemon
+# 3. If using pair instead of connect, start the background daemon
 # Portable background launch (Windows PowerShell/CMD/Git Bash, macOS, Linux):
-<nia-cli> start --cwd "/path/to/workspace" --daemon
+# <nia-cli> start --cwd "/path/to/workspace" --daemon
 # Optional: --log-file "/path/to/bridge.log"; default: <config-dir>/daemon.log
 # POSIX-only alternative (not Windows):
-nohup <nia-cli> start --cwd "$PWD" > /tmp/nia-agent.log 2>&1 &
+# nohup <nia-cli> start --cwd "$PWD" > /tmp/nia-agent.log 2>&1 &
 
 # DSH uses different pairing and startup commands instead (macOS / Linux):
+# npx --prefix ~/.dsh/profiles/web nia-dsh connect
 # npx --prefix ~/.dsh/profiles/web nia-dsh status
 # npx --prefix ~/.dsh/profiles/web nia-dsh pair --label 'My DSH'
 # nohup dsh web > /tmp/nia-dsh.log 2>&1 &
 ```
 
-`<nia-cli>` means `nia-claude`, `nia-codex`, `nia-agy`, `nia-workbuddy`, `nia-doubao`, or `nia-droid`. Omitting `--daemon` runs in the foreground; `--daemon` launches a detached Node process without `nohup` or `/tmp`. Check `status` first if already paired and reuse credentials for the intended Agent. DSH runs inside Harness, not through `nia-dsh start`.
+`<nia-cli>` means `nia-claude`, `nia-codex`, `nia-agy`, `nia-workbuddy`, `nia-doubao`, or `nia-droid`. With `start`, omitting `--daemon` runs in the foreground; `--daemon` launches a detached Node process without `nohup` or `/tmp`. Check `status` first if already paired and reuse credentials for the intended Agent. DSH runs inside Harness, not through `nia-dsh start`.
 
 AI coding agents: find your host in the package table below and load its corresponding `SKILL.md` for host-specific sign-in checks, pairing, and startup guidance.
 
-For `connect --invite-code`, see [invite-code onboarding](./docs/INVITE-CONNECT.md).
+For WeChat QR setup and optional GroupChat invites, see [WeChat connect](./docs/WECHAT-CONNECT.md).
 
 ## Packages
 
@@ -304,6 +307,6 @@ npm test
 npm run verify:docs
 ```
 
-Protocol map: [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) (invite-code onboarding: [docs/INVITE-CONNECT.md](./docs/INVITE-CONNECT.md)). Package `dist/**/*.d.ts` files define interfaces, `skills/` guides consumer AI, and core `examples/` contains runnable ESM pairing and message examples. Update both language guides, skills, and tests when public contracts change.
+Protocol map: [docs/SPECIFICATION.md](./docs/SPECIFICATION.md) (WeChat connect: [docs/WECHAT-CONNECT.md](./docs/WECHAT-CONNECT.md)). Package `dist/**/*.d.ts` files define interfaces, `skills/` guides consumer AI, and core `examples/` contains runnable ESM pairing and message examples. Update both language guides, skills, and tests when public contracts change.
 
 [MIT](./LICENSE) © Nia Teams

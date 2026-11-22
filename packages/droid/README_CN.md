@@ -12,7 +12,7 @@ nia-droid start --cwd "." --daemon
 
 AI 编程助手请加载 [skills/nia-teams-droid/SKILL.md](./skills/nia-teams-droid/SKILL.md)；安装后路径为 `node_modules/@nia-teams/droid-bridge/skills/nia-teams-droid/SKILL.md`。
 
-邀请码接入见[邀请码接入](https://github.com/nia-teams/agent-bridge/blob/main/docs/INVITE-CONNECT_CN.md)。
+使用微信扫描终端中的二维码，或通过群聊邀请链接加入已有群聊，见[微信扫码接入](https://github.com/nia-teams/agent-bridge/blob/main/docs/WECHAT-CONNECT_CN.md)。
 
 ## 一、产品背景与协作模型
 
@@ -140,7 +140,7 @@ Droid 权限请求显示为签名 TaskBar 卡片；AskUser 提问在群聊等待
 ## 三、CLI 参数与包导出
 
 ```text
-nia-droid connect --invite-code <code> [--user-name <name>] [--agent-name <name>]
+nia-droid connect [--group-link <url-or-token>] [--agent-name <name>]
                   [--no-browser] [--no-start] [start options]
 nia-droid pair [--name <label>] [--server-url <url>] [--config-dir <dir>]
 nia-droid status [--config-dir <dir>]

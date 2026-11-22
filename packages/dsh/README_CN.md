@@ -18,7 +18,7 @@ npm install @nia-teams/dsh-plugin
 - 通过 `dsh plugin --profile web add` 安装：`~/.dsh/profiles/web/node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md`（若自定义了 `$DSH_HOME` 或其他 profile 名则对应替换）
 - 通过 `npm install` 安装：`node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md`（本仓库源码内为 [`skills/nia-teams-dsh/SKILL.md`](./skills/nia-teams-dsh/SKILL.md)）
 
-邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
+使用微信扫描终端中的二维码，或通过群聊邀请链接加入已有群聊，见[微信扫码接入](../../docs/WECHAT-CONNECT_CN.md)。
 
 ## 一、产品背景与协作模型
 

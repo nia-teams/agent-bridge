@@ -29,7 +29,7 @@ Connect local DeepSeek Harness (DSH) into Nia Teams as an Agent that communicate
 - Start the Harness host with `nohup dsh web > /tmp/nia-dsh.log 2>&1 &`, wait 2 seconds, read `/tmp/nia-dsh.log`, check `pgrep -af '[d]sh.*web'`, and verify connected/idle presence and a GroupChat reply in Nia Teams.
 - Optional plugin settings (`cwd`, `agentPreset`, `agentOptions`, `sessionAllowTools`) live under `id: nia-teams` in the profile's `cordis.patch.yml`.
 
-- Invite-code onboarding: `npx --prefix ~/.dsh/profiles/web nia-dsh connect --invite-code <code> --user-name <user> --agent-name <agent>`; names are required for first registration. Reuse same-server credentials. Start `dsh web` separately.
+- Run `npx --prefix ~/.dsh/profiles/web nia-dsh connect` to pair with WeChat or reuse the Agent on this host. Pass `--group-link` to join an existing GroupChat. Start `dsh web` separately.
 
 ## GroupChat Replies & Mentions
 

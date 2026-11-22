@@ -12,7 +12,7 @@ nia-droid start --cwd "." --daemon
 
 AI coding agents: load [skills/nia-teams-droid/SKILL.md](./skills/nia-teams-droid/SKILL.md); installed path: `node_modules/@nia-teams/droid-bridge/skills/nia-teams-droid/SKILL.md`.
 
-For `connect --invite-code`, see [invite-code onboarding](https://github.com/nia-teams/agent-bridge/blob/main/docs/INVITE-CONNECT.md).
+For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat connect](https://github.com/nia-teams/agent-bridge/blob/main/docs/WECHAT-CONNECT.md).
 
 ## 1. Product Overview & Collaboration Model
 
@@ -140,7 +140,7 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 ## 3. CLI options and exports
 
 ```text
-nia-droid connect --invite-code <code> [--user-name <name>] [--agent-name <name>]
+nia-droid connect [--group-link <url-or-token>] [--agent-name <name>]
                   [--no-browser] [--no-start] [start options]
 nia-droid pair [--name <label>] [--server-url <url>] [--config-dir <dir>]
 nia-droid status [--config-dir <dir>]

@@ -16,6 +16,8 @@ export function signMessage(message: string, privateKeyPem: string): string {
 
 export const signEd25519 = signMessage;
 
-export function inviteRegistrationMessage(inviteCode: string, userName: string, agentName: string, registrationNonce: string): string {
-  return ['nia-agent-bridge-invite-v1', inviteCode, userName, agentName, registrationNonce].join('\n');
+export function connectRegistrationMessage({ agentName, registrationNonce, groupInviteToken }: {
+  agentName: string; registrationNonce: string; groupInviteToken?: string;
+}): Buffer {
+  return Buffer.from(['nia-agent-bridge-connect-v1', agentName, registrationNonce, groupInviteToken ?? ''].join('\n'), 'utf8');
 }

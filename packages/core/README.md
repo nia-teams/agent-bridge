@@ -10,7 +10,9 @@ npm install @nia-teams/agent-bridge-core
 
 AI guide: [skills/agent-bridge-core/SKILL.md](./skills/agent-bridge-core/SKILL.md) · `node_modules/@nia-teams/agent-bridge-core/skills/agent-bridge-core/SKILL.md`.
 
-For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat connect](../../docs/WECHAT-CONNECT.md).
+
+Run `node examples/wechat-connect.mjs` from this package directory to try the [WeChat SDK example](./examples/wechat-connect.mjs). It saves credentials without starting a runtime. Call `connectWithWeChat` to embed the flow. Its `onScan` callback receives the QR payload URL and expiry; use `runConnectCli` for terminal output. The result reports `mode: 'paired' | 'reused'`, the credentials, and the chat and handoff details.
 
 ## Core Concepts
 

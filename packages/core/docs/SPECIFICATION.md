@@ -486,26 +486,86 @@ Incoming messages carry sender metadata, for example `[chat:<chatId>] Alice (<us
 
 To notify a member with a native Nia Teams highlight, emit `<mention userId="<userId>" />` in the published reply. Plain `@Name` is text, not a real mention. Do not invent IDs; consult the member list/history if needed.
 
-## Invite-code registration and group creation
+## WeChat connect
 
-`inviteCode` is `raw.trim().toUpperCase()` and must match `/^[A-Z0-9_-]{4,64}$/`. First registration requires `userName` and `agentName`, each normalized with `raw.replace(/\s+/g, ' ').trim()` and of length 1–60 (JavaScript string length). The host generates an Ed25519 keypair and `registrationNonce = randomBytes(32).toString('base64url')`.
+`POST /api/agent-bridge/connect/start` requires no browser login. JSON body:
 
-The UTF-8 signature input has no trailing newline:
-
-```text
-nia-agent-bridge-invite-v1
-<inviteCode>
-<userName>
-<agentName>
-<registrationNonce>
+```ts
+{
+  publicKey: string;         // Ed25519 SPKI PEM
+  registrationNonce: string; // 16–512 characters; not blank; no CR or LF
+  signature: string;         // Ed25519 signature, unpadded base64url
+  agentName: string;         // collapse whitespace to spaces, trim, then 1–60 characters
+  hostLabel?: string;        // at most 256 characters; defaults to "External Agent"
+  clientName?: string;       // trimmed, 1–80 characters, no ASCII control characters
+  avatar?: string;           // PNG data URL; at most 64 KiB decoded, at most 1024 × 1024
+  groupInviteToken?: string;  // raw token from /join/<token>; omit for a new chat
+}
 ```
 
-`POST /api/agent-bridge/pairing/invite` accepts `{ inviteCode, userName, agentName, publicKey, registrationNonce, signature, hostLabel, clientName?, avatar? }`. `publicKey` is SPKI PEM; `signature` is an Ed25519 signature encoded as base64. `hostLabel` defaults to `<hostPrefix or agent-bridge>@<hostname>`; branding follows section 1.2.
+`connectRegistrationMessage` signs these exact UTF-8 bytes:
 
-Success returns `{ ok: true, userId, teamId, agentSlug, agentName, issuer, keyGeneration, groupChatId, handoffUrl }`. Credentials retain the locally generated keypair and are saved in a `0700` directory with file mode `0600`.
+```ts
+Buffer.from(['nia-agent-bridge-connect-v1', normalizedAgentName, registrationNonce, groupInviteToken ?? ''].join('\n'), 'utf8')
+```
 
-For existing same-server credentials, the host requests `POST /api/agent-bridge/challenge` with `{ teamId }`, verifies `teamId` and `keyGeneration`, and signs the challenge using section 1.4. It then sends `POST /api/agent-bridge/invite-group-chat` with `{ teamId, challengeId, signature, inviteCode }`. Success returns `{ ok: true, userId, teamId, agentSlug, agentName, groupChatId, handoffUrl }`; stored credentials remain unchanged. Challenge failures (including 404) or changed key generations require explicit re-pairing. Names do not authorize replacement registration. An explicitly different server URL selects first registration.
+Do not trim the nonce or token. Without a group token the signed message ends in
+one LF; with a token there is no trailing LF. The CLI must extract the token from
+an invite URL before calling the API. Full invite URLs and read-only `/share/`
+links are not accepted. Invalid, expired or blocked invites return `404` before
+there is anything to scan. Invalid signatures return `403`, an already used
+registration nonce returns `409`, and starts are limited to 30 per IP per minute (`429`).
 
-`connectWithInvite` returns `{ mode: 'paired' | 'reused', credentials, userId, groupChatId, handoffUrl, browserOpened }`. `openBrowser: false` disables browser launch. `NIA_NO_BROWSER` suppresses connection browser launch; `openBrowser` itself honors `NIA_NO_BROWSER=1`. Browser commands use argument arrays without a shell: `open` on macOS, `rundll32.exe url.dll,FileProtocolHandler` on Windows, and `xdg-open` elsewhere. Only HTTP(S) URLs are accepted; spawn failures return `false`. `browserOpened` means the opener spawned, not that a page finished loading.
+Success: `{ flowId, pollSecret, qrUrl, expiresInSeconds: 600 }`. Render `qrUrl`
+as a QR code in the terminal. Keep `pollSecret` private.
 
-Invite handoff URLs must be absolute HTTP(S) URLs without a username or password. HTTPS server origins require HTTPS handoff URLs. The handoff host and port may differ from the request origin (for example, a configured public base URL behind a reverse proxy). Validation applies before saving new credentials, returning the result, or opening a browser, including when browser launch is disabled.
+### Poll for host credentials
+
+`GET /api/agent-bridge/connect/status?flowId=…`, with `X-Poll-Secret: <pollSecret>`
+(or `Authorization: Bearer <pollSecret>`). A wrong secret on a live record
+returns `403`. A waiting request returns `{ status: 'pending' }`. A missing,
+expired or already-consumed result returns `{ status: 'expired' }` (HTTP 200).
+The completed result is available for up to five minutes and is returned once:
+
+```ts
+{
+  status: 'complete';
+  userId: string;
+  teamId: string;
+  agentSlug: string;
+  agentName: string;
+  issuer: string;
+  keyGeneration: 1;
+  groupChatId: string;
+  groupChatTitle: string;
+  handoffUrl: string;
+}
+```
+
+### An already-paired host
+
+`POST /api/agent-bridge/connect/join-group` takes
+`{ teamId, challengeId, signature, groupInviteToken? }`. Obtain a fresh
+challenge via `POST /api/agent-bridge/challenge` with `{ teamId }` and sign it
+using the normal bridge `challengeMessage` and paired key. Each challenge is
+single-use; this endpoint does not need or issue a WebSocket lease. An invite
+adds both the canonical active owner and Agent to the existing chat, without
+duplicate membership or join events. Without one, it creates a new two-member
+chat. Success:
+
+```ts
+{ ok: true, userId, teamId, agentSlug, agentName, groupChatId, groupChatTitle, handoffUrl }
+```
+
+### Browser handoff
+
+Open `handoffUrl` (`GET /api/agent-bridge/handoff?code=…`) in the user's browser.
+The HTML page does not consume the link; `POST /api/agent-bridge/handoff/redeem`
+with `{ code }` does and returns `{ ok: true, token, groupChatId, redirectTo }`.
+The code expires after five minutes and rechecks the account's active status.
+Treat the paired private key and the one-time handoff URL as credentials. The
+CLI accepts only absolute HTTP(S) URLs without user credentials. `handoffUrl`
+must match the selected server origin and use the exact path
+`/api/agent-bridge/handoff`. Configure `--server-url` with the public origin if
+a reverse proxy serves the handoff route. The QR payload `qrUrl` may point to a different WeChat provider
+origin and must use HTTPS when the selected server uses HTTPS.

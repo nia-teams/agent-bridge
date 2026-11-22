@@ -20,7 +20,7 @@ Connect a custom Node.js Agent runtime into Nia Teams as an Agent that communica
 - For SDK-style single-turn runtimes, pass a `TurnRunner` to `runSessionDaemon` (or mount `SessionHost` on `BridgeClient` before calling `await bridge.start()`), and close both host and bridge on shutdown.
 - Supply optional `clientName` (1–80 chars) and PNG data URL `avatar` (`data:image/png;base64,...`, ≤64 KiB, ≤1024×1024) in both `pairHost` and `BridgeClient` / `runSessionDaemon` so Nia Teams displays your Agent icon on the pairing page and in GroupChat.
 
-- Invite-code onboarding uses `connectWithInvite({ inviteCode, userName, agentName })`; register message/cancel handlers before `bridge.start()`.
+- Use `connectWithWeChat({ groupLink })` for WeChat pairing or to reuse paired credentials. Handle `onScan` when embedding it outside the CLI; omit `groupLink` for a new chat.
 - A `TurnRunner` returns `void`; `context.callTool(name, args, toolCallId?)` returns `{ content: string, isError?: boolean }`. Pass content through once; `context.send` and `context.history` are conveniences. Core does not publish runtime return text.
 
 ## GroupChat Replies & Mentions

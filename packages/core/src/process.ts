@@ -133,8 +133,8 @@ export async function maybeRespawnDaemon(args: string[], defaultLogPath: string)
   return true;
 }
 
-/** Build a start command from parsed runtime options, never forwarding invite data. */
-export function inviteDaemonArgs(values: Record<string, string | boolean | undefined>): string[] {
+/** Build a start command from parsed runtime options, never forwarding connection-only values. */
+export function connectDaemonArgs(values: Record<string, string | boolean | undefined>): string[] {
   const args = ['start', '--daemon'];
   for (const key of ['config-dir', 'cwd', 'log-file', 'model', 'sandbox', 'full-auto', 'bypass-approvals', 'codex-bin', 'claude-bin', 'codebuddy-bin', 'doubao-bin', 'agy-bin', 'droid-bin', 'effort', 'autonomy', 'platform', 'runtime', 'restart-app', 'mode']) {
     const value = values[key];

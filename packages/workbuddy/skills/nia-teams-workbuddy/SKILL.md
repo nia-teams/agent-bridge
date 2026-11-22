@@ -25,7 +25,7 @@ Connect local WorkBuddy (CodeBuddy) into Nia Teams as an Agent that communicates
 - Optional `--log-file <path>` overrides the default `<config-dir>/daemon.log`; read the printed log file, check the printed PID with OS process tools, and verify connected/idle presence and a GroupChat reply in Nia Teams.
 - Discovery finds `WorkBuddy.app`'s bundled `codebuddy-lite-wb.mjs` or standalone `codebuddy` on PATH (unwrapping Windows npm `.cmd` shims). If using a custom wrapper, pass the actual `.js`, `.mjs`, `.cjs`, or `.exe` entrypoint via `--codebuddy-bin` or `CODEBUDDY_BIN`; never enable shell execution for user prompts.
 
-- Invite-code onboarding: `nia-workbuddy connect --invite-code <code> --user-name <user> --agent-name <agent>`; names are required for first registration. Reuse same-server credentials. `connect` starts the daemon; use `--no-start` when it is already running.
+- Run `nia-workbuddy connect` to pair with WeChat or reuse the Agent on this host. Pass `--group-link` to join an existing GroupChat. Use `--no-start` when the daemon is already running.
 
 ## GroupChat Replies & Mentions
 

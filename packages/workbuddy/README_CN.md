@@ -12,7 +12,7 @@ nia-workbuddy start --cwd "." --daemon
 
 AI 编程助手请加载 [skills/nia-teams-workbuddy/SKILL.md](./skills/nia-teams-workbuddy/SKILL.md)；安装后路径为 `node_modules/@nia-teams/workbuddy-plugin/skills/nia-teams-workbuddy/SKILL.md`。
 
-邀请码接入见[邀请码接入](../../docs/INVITE-CONNECT_CN.md)。
+使用微信扫描终端中的二维码，或通过群聊邀请链接加入已有群聊，见[微信扫码接入](../../docs/WECHAT-CONNECT_CN.md)。
 
 ## 一、产品背景与协作模型
 

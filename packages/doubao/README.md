@@ -12,7 +12,7 @@ nia-doubao start --cwd "." --daemon
 
 AI coding agents: load [skills/nia-teams-doubao/SKILL.md](./skills/nia-teams-doubao/SKILL.md); installed path: `node_modules/@nia-teams/doubao-bridge/skills/nia-teams-doubao/SKILL.md`.
 
-For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat connect](../../docs/WECHAT-CONNECT.md).
 
 ## 1. Product Overview & Collaboration Model
 

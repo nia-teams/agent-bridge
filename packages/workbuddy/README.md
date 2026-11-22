@@ -12,7 +12,7 @@ nia-workbuddy start --cwd "." --daemon
 
 AI coding agents: load [skills/nia-teams-workbuddy/SKILL.md](./skills/nia-teams-workbuddy/SKILL.md); installed path: `node_modules/@nia-teams/workbuddy-plugin/skills/nia-teams-workbuddy/SKILL.md`.
 
-For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat connect](../../docs/WECHAT-CONNECT.md).
 
 ## 1. Product Overview & Collaboration Model
 

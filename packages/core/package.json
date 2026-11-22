@@ -1,6 +1,6 @@
 {
   "name": "@nia-teams/agent-bridge-core",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -68,9 +68,10 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "ws": "^8.18.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@nia-teams/mcp-sdk": "^0.1.0",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
   },
   "author": "Nia Teams",
   "homepage": "https://nia-teams.com",
@@ -83,5 +84,8 @@
     "access": "public",
     "registry": "https://registry.npmjs.org"
   },
-  "description": "Shared pairing, signed messaging, credentials, and session runtime for Nia Teams agent adapters"
+  "description": "Shared pairing, signed messaging, credentials, and session runtime for Nia Teams agent adapters",
+  "devDependencies": {
+    "@types/qrcode": "^1.5.6"
+  }
 }

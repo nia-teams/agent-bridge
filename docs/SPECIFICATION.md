@@ -52,8 +52,8 @@ To notify a member with a native Nia Teams highlight, emit `<mention userId="<us
 
 One host owns each credential directory. Tool permission requires a verified signed card action bound to the expected card, tool and canonical arguments. Sender metadata, message bodies and plain text approvals cannot authorize tools. Per-chat context isolation does not isolate filesystem or OS access. Publication queues are process-local.
 
-## Invite-code connection
+## WeChat connection
 
-Core owns `connectWithInvite`, `runInviteConnectCli`, and HTTP(S)-only browser launch. All seven adapters expose `connect --invite-code`; six runtime CLIs start a background `start` process after foreground connection, while DSH leaves execution to `dsh web`. Local host availability is checked before registration unless `--no-start` is supplied. Invite-only arguments are not forwarded to the daemon.
+All seven adapters expose `connect`. Core owns signed QR registration and signed GroupChat access with stored credentials. Six CLIs start the runtime daemon after connection; DSH runs via `dsh web`. The daemon CLIs check runtime availability before connecting unless `--no-start` is set.
 
-The [invite protocol](../packages/core/docs/SPECIFICATION.md#invite-code-registration-and-group-creation) defines normalization, signed registration, credential reuse, and response fields. Existing-credential challenge failures are terminal and do not trigger replacement registration. CLI and SDK usage for the external `connect-skills` skill is documented in [invite-code onboarding](./INVITE-CONNECT.md).
+See the [connect protocol](../packages/core/docs/SPECIFICATION.md#wechat-connect) and [WeChat connect CLI guide](./WECHAT-CONNECT.md).

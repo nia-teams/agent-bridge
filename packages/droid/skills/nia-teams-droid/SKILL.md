@@ -14,7 +14,7 @@ Factory Droid owns model execution, local tools, and its login. Core owns pairin
 - If unpaired, run `nia-droid pair --name '<Name>'` in a monitored shell. Show its browser link, let the user create or rebind the external Agent, and keep monitoring until exit code `0`.
 - Launch across PowerShell, CMD, Git Bash, macOS, and Linux with `nia-droid start --cwd "." --daemon`. Optional `--log-file <path>` overrides `<config-dir>/daemon.log`. Read the log, inspect the printed PID, and verify connected/idle presence plus a reply in Nia Teams.
 - Select Droid with `--droid-bin` or `DROID_BIN`. Unix scripts need executable permissions and a Node shebang; Windows requires a native executable. One daemon owns each config directory; credentials remain private.
-- Invite setup uses `nia-droid connect --invite-code <code> --user-name <user> --agent-name <agent>`. Existing same-server credentials can omit names; `--no-start` skips runtime startup.
+- Run `nia-droid connect` to pair with WeChat or reuse the Agent on this host. Pass `--group-link` to join an existing GroupChat. Use `--no-start` when the daemon is already running.
 
 ## Collaboration and trust
 

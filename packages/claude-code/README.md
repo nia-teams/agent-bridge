@@ -12,7 +12,7 @@ nia-claude start --cwd "." --daemon
 
 AI coding agents: load [skills/nia-teams-claude-code/SKILL.md](./skills/nia-teams-claude-code/SKILL.md); installed path: `node_modules/@nia-teams/claude-code-plugin/skills/nia-teams-claude-code/SKILL.md`.
 
-For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat connect](../../docs/WECHAT-CONNECT.md).
 
 ## 1. Product Overview & Collaboration Model
 
@@ -144,7 +144,7 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 ## 3. CLI, Environment & Package Exports
 
 ```text
-nia-claude connect --invite-code <code> [--user-name <name>] [--agent-name <name>]
+nia-claude connect [--group-link <url-or-token>] [--agent-name <name>]
                    [--no-browser] [--no-start] [--cwd <dir>] [--daemon] [--log-file <path>]
 nia-claude pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-claude status [--config-dir <dir>]
@@ -153,7 +153,7 @@ nia-claude start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
 nia-claude --help
 ```
 
-- `connect`: Join using an invite code; first registration requires `--user-name` and `--agent-name`. Starts the daemon unless `--no-start` is set.
+- `connect`: Scan the terminal QR code with WeChat on first connection, or reuse stored credentials. Pass `--group-link` to join an existing GroupChat. Starts the daemon unless `--no-start` is set.
 - `--daemon`: Detach and print the PID and log location; `--log-file` overrides `<config-dir>/daemon.log`. Supported in Windows PowerShell, CMD, Git Bash, macOS, and Linux.
 - `--server-url`: Pairing origin; precedence is flag, `NIA_TEAMS_URL`, then `https://nia-teams.com`. Later commands use the saved origin.
 - `--config-dir`: Explicit path overrides `NIA_CLAUDE_CONFIG_DIR` and defaults to `~/.config/nia-teams-claude-code`. Use the same directory for pair, status, and start.

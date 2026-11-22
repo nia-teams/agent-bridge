@@ -18,7 +18,7 @@ When configuring or embedding this package with an AI coding agent (Nia Teams Ag
 - Installed via `dsh plugin --profile web add`: `~/.dsh/profiles/web/node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md` (adjust for `$DSH_HOME` or another profile name)
 - Installed via `npm install`: `node_modules/@nia-teams/dsh-plugin/skills/nia-teams-dsh/SKILL.md` (or [`skills/nia-teams-dsh/SKILL.md`](./skills/nia-teams-dsh/SKILL.md) in this repository)
 
-For `connect --invite-code`, see [invite-code onboarding](../../docs/INVITE-CONNECT.md).
+For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat connect](../../docs/WECHAT-CONNECT.md).
 
 ## 1. Product Overview & Collaboration Model
 

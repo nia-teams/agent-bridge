@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createDroidRunner, resolveDroidBinary, validateDroidOptions } from '../dist/runner.js';
 import { clientBranding } from '../dist/branding.js';
-import { inviteDaemonArgs } from '@nia-teams/agent-bridge-core';
+import { connectDaemonArgs } from '@nia-teams/agent-bridge-core';
 import { fixture } from '../../core/tests/helpers.mjs';
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL('../bin/nia-droid.mjs', import.meta.url));
@@ -18,7 +18,7 @@ test('effort/autonomy validate eagerly and all Factory values are supported', ()
   for (const options of [{effort:'unsafe'},{autonomy:'bypass'},{effort:''},{autonomy:''}]) assert.throws(() => createDroidRunner({cwd:'.',...options}), /Invalid/);
 });
 test('invite daemon arguments preserve Droid options without invite data', () => {
-  const args = inviteDaemonArgs({'config-dir':'/tmp/config','droid-bin':'/tmp/droid','effort':'high','autonomy':'off','full-auto':true,'invite-code':'SECRET','user-name':'Alice','agent-name':'Helper'});
+  const args = connectDaemonArgs({'config-dir':'/tmp/config','droid-bin':'/tmp/droid','effort':'high','autonomy':'off','full-auto':true,'group-link':'SECRET','agent-name':'Helper'});
   for (const value of ['--droid-bin','/tmp/droid','--effort','high','--autonomy','off','--full-auto']) assert.ok(args.includes(value));
   assert.ok(!args.includes('SECRET'));assert.ok(!args.includes('Alice'));
 });

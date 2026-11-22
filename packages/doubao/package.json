@@ -1,6 +1,6 @@
 {
   "name": "@nia-teams/doubao-bridge",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -33,7 +33,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@nia-teams/agent-bridge-core": "^0.3.3",
+    "@nia-teams/agent-bridge-core": "^0.3.4",
     "doubao-cli": "0.23.3"
   },
   "author": "Nia Teams",

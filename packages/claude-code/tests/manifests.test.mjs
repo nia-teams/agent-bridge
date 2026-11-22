@@ -55,5 +55,4 @@ test('CLI rejects unsupported commands and multiple commands with the supported 
       return true;
     });
   }
-  await assert.rejects(cli('connect'), /connect requires --invite-code/);
 });
