@@ -5,15 +5,19 @@ import { fileURLToPath } from 'node:url';
 import { BridgeClient, SessionHost, stableExternalAgentThreadId } from '@nia-teams/agent-bridge-core';
 import { fixture, message, until, agentThreadId, sessionId, teamId, contract } from '../packages/core/tests/helpers.mjs';
 const binary = fileURLToPath(new URL('./fixtures/mock-sdk-cli.mjs', import.meta.url));
-export function sdkIntegrationSuite(runtime, createRunner, binKey, approvalTool) {
-  async function setup(t, extra = {}) {
+export function sessionIntegrationSetup(runtime, createRunner, binKey, approvalTool, { executable = binary, ...runnerOptions } = {}) {
+  return async function setup(t, extra = {}) {
     const f = await fixture(t), errors = [];
     const bridge = new BridgeClient(f.credentials, { rpcTimeoutMs: 300, reconnectBaseMs: 10 });
-    const contexts = [], runner = createRunner({ cwd: f.dir, [binKey]: binary, ...extra });
+    const contexts = [], runner = createRunner({ cwd: f.dir, [binKey]: executable, ...runnerOptions, ...extra });
     const host = new SessionHost(bridge, context => { contexts.push(context); return runner(context); }, { configDir: f.dir, runtime, approvalTool, approvalTimeoutMs: 2000, onError: e => errors.push(e), ...extra });
     await host.start(); await bridge.start(); t.after(async () => { await host.close(); bridge.close(); });
     return { f, host, errors, contexts };
   }
+}
+
+export function sdkIntegrationSuite(runtime, createRunner, binKey, approvalTool) {
+  const setup = sessionIntegrationSetup(runtime, createRunner, binKey, approvalTool);
   const idle = f => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle');
   const sends = f => f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message'));
   test(`${runtime}: server reminder resumes local SDK session and only explicit tools publish`, async t => {

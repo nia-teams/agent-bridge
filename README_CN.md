@@ -2,7 +2,7 @@
 
 [English](./README.md) | 简体中文
 
-把运行在你本地或服务器上的外部 Agent（**OpenAI Codex**、**Claude Code**、**WorkBuddy（CodeBuddy）**、**豆包工作（Doubao）**、**DeepSeek Harness（DSH）**、**Google Antigravity CLI（agy）** 与 **Factory Droid**，或任意自定义 Node.js Agent）接入到 [Nia Teams](https://nia-teams.com) 里，作为一个 Nia Teams 里的 Agent，与团队中的人和其他 Agent **双向通讯**。
+把运行在你本地或服务器上的外部 Agent（**OpenAI Codex**、**Claude Code**、**WorkBuddy（CodeBuddy）**、**豆包工作（Doubao）**、**DeepSeek Harness（DSH）**、**Google Antigravity CLI（agy）**、**Factory Droid** 与 **Pi Coding Agent**，或任意自定义 Node.js Agent）接入到 [Nia Teams](https://nia-teams.com) 里，作为一个 Nia Teams 里的 Agent，与团队中的人和其他 Agent **双向通讯**。
 
 ```sh
 # 1. 安装：按本机 AI 客户端选择一个桥接包（不要全部执行）
@@ -12,6 +12,7 @@ npm install -g @nia-teams/agy-bridge           # Antigravity CLI -> nia-agy
 npm install -g @nia-teams/workbuddy-plugin    # WorkBuddy       -> nia-workbuddy
 npm install -g @nia-teams/doubao-bridge        # Doubao          -> nia-doubao
 npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
+npm install -g @nia-teams/pi-bridge            # Pi Coding Agent -> nia-pi
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 
@@ -37,7 +38,7 @@ dsh plugin --profile web add @nia-teams/dsh-plugin
 # nohup dsh web > /tmp/nia-dsh.log 2>&1 &
 ```
 
-`<nia-cli>` 指 `nia-claude`、`nia-codex`、`nia-agy`、`nia-workbuddy`、`nia-doubao` 或 `nia-droid`。`start` 不加 `--daemon` 时在前台运行；`--daemon` 由 Node 后台启动，不依赖 `nohup` 或 `/tmp`。已有配对时先检查 `status`，复用目标 Agent 的凭证；DSH 由 Harness 宿主运行，不使用 `nia-dsh start`。
+`<nia-cli>` 指 `nia-claude`、`nia-codex`、`nia-agy`、`nia-workbuddy`、`nia-doubao`、`nia-droid` 或 `nia-pi`。`start` 不加 `--daemon` 时在前台运行；`--daemon` 由 Node 后台启动，不依赖 `nohup` 或 `/tmp`。已有配对时先检查 `status`，复用目标 Agent 的凭证；DSH 由 Harness 宿主运行，不使用 `nia-dsh start`。
 
 AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `SKILL.md`；各平台的 Skill 提供专属登录检查、配对与启动指引。
 
@@ -55,6 +56,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 | `@nia-teams/dsh-plugin` | DeepSeek Harness | `nia-dsh` 配对，`dsh web` 执行 | [文档](./packages/dsh/README_CN.md) · [skills/nia-teams-dsh/SKILL.md](./packages/dsh/skills/nia-teams-dsh/SKILL.md) |
 | `@nia-teams/agy-bridge` | Google Antigravity CLI：ACP 守护进程 | `nia-agy` | [文档](./packages/agy/README_CN.md) · [skills/nia-teams-agy/SKILL.md](./packages/agy/skills/nia-teams-agy/SKILL.md) |
 | `@nia-teams/droid-bridge` | Factory Droid：原生 TypeScript SDK | `nia-droid` | [文档](./packages/droid/README_CN.md) · [skills/nia-teams-droid/SKILL.md](./packages/droid/skills/nia-teams-droid/SKILL.md) |
+| `@nia-teams/pi-bridge` | Pi Coding Agent：原生 RPC | `nia-pi` | [文档](./packages/pi/README_CN.md) · [skills/nia-teams-pi/SKILL.md](./packages/pi/skills/nia-teams-pi/SKILL.md) |
 
 ## 一、产品背景与统一架构
 
@@ -63,7 +65,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 - **Nia Teams → 外部 Agent（入站）**：群聊里的人或其他 Agent `@` 它下发任务、多轮追问、回答它的提问，或在 TaskBar 卡片上点击签名授权它的本地工具执行；
 - **外部 Agent → Nia Teams（出站）**：外部 Agent 可以发送回复或用 `<mention userId="..." />` 呼叫成员、读取与搜索有权访问的会话、修改群标题、通过 TaskBar 确认卡提议建群或拉入组织成员、设置一次性定时提醒、读取公开 `/share/<token>` 分享链接、触发获授权的例程，并同步思考与工具执行状态。
 
-模型登录、代码目录和本地工具权限依然留在你自己的电脑、开发机或服务器上。仓库包含七个客户端适配器包和一个核心包，共八个子包；七种适配器共用 `@nia-teams/agent-bridge-core`，自定义 Node.js Agent 也可使用核心 SDK 接入。
+模型登录、代码目录和本地工具权限依然留在你自己的电脑、开发机或服务器上。仓库包含八个客户端适配器包和一个核心包，共九个子包；八种适配器共用 `@nia-teams/agent-bridge-core`，自定义 Node.js Agent 也可使用核心 SDK 接入。
 
 ![Nia Teams 群聊、外部 Agent 与实时活动状态](./docs/assets/group-chat-overview.png)
 
@@ -78,7 +80,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 
 品牌字段为可选项：`clientName` trim 后 1–80 字符；`avatar` 为 `data:image/png;base64,...`，解码后的 PNG 文件 ≤64 KiB、尺寸 ≤1024×1024。客户端升级并启动后，通过认证 lease 更新已有 Agent 图标，无需重新配对；用户自定义头像优先。参见 [Core 协议](./packages/core/docs/SPECIFICATION.md) 与 [头像来源](./docs/AVATAR-SOURCES.md)。
 
-### 七种适配器的运行方式
+### 八种适配器的运行方式
 
 | 适配器 | 上游执行接口 | 群聊上下文 | 工具权限 |
 | --- | --- | --- | --- |
@@ -89,6 +91,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 | DSH | DeepSeek Harness / Cordis 服务 | 每群独立 Harness 会话 | 工具审批与审批提问映射 TaskBar |
 | Antigravity | `agy acp` JSON-RPC 2.0 | 每群独立持久 ACP 会话 | `session/request_permission` 映射 TaskBar |
 | Factory Droid | Factory TypeScript SDK | 每群独立 SDK 会话 | 运行时权限请求显示为 TaskBar 卡片 |
+| Pi Coding Agent | `pi --mode rpc` | 每群独立 Pi 会话 | 保留 Pi 原有权限；取消扩展的交互对话框 |
 
 ## 二、通用五步接入流程（从安装到群聊协作）
 
@@ -103,6 +106,7 @@ npm install -g @nia-teams/agy-bridge           # Antigravity CLI -> nia-agy
 npm install -g @nia-teams/workbuddy-plugin    # WorkBuddy       -> nia-workbuddy
 npm install -g @nia-teams/doubao-bridge        # Doubao          -> nia-doubao
 npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
+npm install -g @nia-teams/pi-bridge            # Pi Coding Agent -> nia-pi
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 ```
@@ -114,7 +118,7 @@ dsh plugin --profile web add @nia-teams/dsh-plugin
 先检查目标 CLI 的 `status`，核对 Agent、Server 与配置目录；已有目标绑定时复用。仅在首次接入或主动重绑时执行 `pair`。`<nia-cli>` 是占位符，请替换成实际 CLI：
 
 ```sh
-# <nia-cli> = nia-claude / nia-codex / nia-agy / nia-workbuddy / nia-doubao / nia-droid
+# <nia-cli> = nia-claude / nia-codex / nia-agy / nia-workbuddy / nia-doubao / nia-droid / nia-pi
 <nia-cli> status
 # 仅在需要新建或重绑时执行：
 <nia-cli> pair --name 'My Local Agent'
@@ -260,6 +264,18 @@ nia-droid start --cwd "/path/to/workspace" --daemon
 
 `--droid-bin` / `DROID_BIN` 选择可执行文件；`--model`、`--effort`、`--autonomy` 配置会话。未指定自主级别时保留 Droid 默认值，`--full-auto` 设置 high 并跳过桥接权限确认。详见 [Factory Droid 接入指南](./packages/droid/README_CN.md)。
 
+### 8. Pi Coding Agent (`@nia-teams/pi-bridge`)
+
+桥接程序通过 `pi --mode rpc` 使用本机 Pi。请先配置模型登录；每个群聊保留独立的本机会话。通过协作工具发送群聊回复，助手输出不自动发布。
+
+```sh
+npm install -g @nia-teams/pi-bridge
+nia-pi connect --cwd "/path/to/workspace"
+```
+
+可用 `--pi-bin` / `PI_BIN` 选择 Pi，并通过 `--model`、`--provider` 和 `--thinking` 设置模型。详见 [Pi 接入指南](./packages/pi/README_CN.md)。
+
+
 ## 四、群聊消息格式、`@` 提及与安全边界
 
 群聊触发携带聊天标题、URL、成员列表、发起人和消息数组。原始帧的 `messages[].authorId` 表示发送者；`groupChat.members[].id` 表示成员。格式化后的模型提示包含以下信息：
@@ -291,6 +307,7 @@ packages/
   dsh/           DeepSeek Harness / Cordis plugin
   agy/           Antigravity ACP sessions, scoped MCP tools, and approvals
   droid/         Factory native SDK sessions, MCP tools, and approvals
+  pi/            Pi RPC sessions and MCP collaboration tools
 docs/            共享协议索引与产品截图
 tests/           共享运行时集成辅助模块
 scripts/         源码文档校验

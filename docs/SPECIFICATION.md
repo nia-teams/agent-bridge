@@ -1,6 +1,6 @@
 # Agent Bridge protocol map
 
-The shared transport contract is [core Agent Bridge v3](../packages/core/docs/SPECIFICATION.md). It defines Ed25519 pairing, challenge/lease authentication, WebSocket frames, publication RPCs and signed TaskBar confirmation verification. The repository has seven client adapter packages plus the shared core (eight packages total). Adapter documents describe only their additional runtime contracts:
+The shared transport contract is [core Agent Bridge v3](../packages/core/docs/SPECIFICATION.md). It defines Ed25519 pairing, challenge/lease authentication, WebSocket frames, publication RPCs and signed TaskBar confirmation verification. The repository has eight client adapter packages plus the shared core (nine packages total). Adapter documents describe only their additional runtime contracts:
 
 | Adapter | Runtime contract |
 | --- | --- |
@@ -11,6 +11,7 @@ The shared transport contract is [core Agent Bridge v3](../packages/core/docs/SP
 | DSH | [Harness host protocol](../packages/dsh/docs/SPECIFICATION.md) |
 | Antigravity | [ACP stdio sessions, streaming, permissions, scoped MCP](../packages/agy/docs/SPECIFICATION.md) |
 | Factory Droid | [Native TypeScript SDK, sessions, MCP, permissions](../packages/droid/docs/SPECIFICATION.md) |
+| Pi Coding Agent | [CLI RPC, per-chat sessions, MCP extension](../packages/pi/docs/SPECIFICATION.md) |
 
 Agent Bridge 0.3.0 uses WebSocket `protocolVersion: 3`. Nia Teams supplies collaboration instructions in `ready.systemPrompt` and tool definitions (`name`, `description`, `inputSchema`, `deferLoading?: boolean`) in `ready.tools`. All model-facing tools invoke `tool.call` with host-bound session context. Turn completion reports idle with `deliveryId`; silent-turn reminders arrive as server `thread.message` prompts.
 
@@ -54,6 +55,6 @@ One host owns each credential directory. Tool permission requires a verified sig
 
 ## WeChat connection
 
-All seven adapters expose `connect`. Core owns signed QR registration and signed GroupChat access with stored credentials. Six CLIs start the runtime daemon after connection; DSH runs via `dsh web`. The daemon CLIs check runtime availability before connecting unless `--no-start` is set.
+All eight adapters expose `connect`. Core owns signed QR registration and signed GroupChat access with stored credentials. Seven CLIs start the runtime daemon after connection; DSH runs via `dsh web`. The daemon CLIs check runtime availability before connecting unless `--no-start` is set.
 
 See the [connect protocol](../packages/core/docs/SPECIFICATION.md#wechat-connect) and [WeChat connect CLI guide](./WECHAT-CONNECT.md).

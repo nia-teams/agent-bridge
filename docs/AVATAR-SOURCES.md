@@ -15,6 +15,7 @@ Sources retrieved 2026-11-10 (brand marks belong to their respective owners):
 - Doubao: https://lf-flow-web-cdn.doubao.com/obj/flow-doubao/favicon/new-doubao/192x192.png (official application icon, resized to 256×256).
 
 - Factory Droid: 256×256 PNG rasterized from the Factory Droid brand mark for this adapter (2026-11-18).
+- Pi: https://pi.dev/favicon.svg (official SVG, light-theme mark rasterized at 256×256 on 2026-11-22).
 
 
 ## Protocol

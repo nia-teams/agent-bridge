@@ -25,3 +25,5 @@
 - Abort sends session/cancel, terminates an unresponsive generation after two seconds, and never replays a failed prompt. Only explicit resume RPC errors permit session/new. CLI owns runner.close in finally around runSessionDaemon.
 
 - Factory Droid uses @factory/droid-sdk/node with a connected ProcessTransport for browser or API-key login. Close session, transport and SDK MCP server in finally. Only SessionNotFoundError before prompting permits session creation; never replay a stream. Explicit resumed model/effort/autonomy use updateSettings; runtime permission names use droid: to avoid AskUserQuestion dispatch.
+
+- Pi uses one `pi --mode rpc` child per turn; LF is the only JSONL delimiter. Persist `get_state.data.sessionFile` per chat. Replace unavailable sessions before prompting only; wait for `agent_settled` unless the prompt was handled by an extension. Pi 0.74.2 omits prompt disposition and needs the legacy idle probe after retry, compaction, and queued work drain. Pi retains native permissions; cancel headless UI dialogs and give the bundled extension only the per-turn loopback capability.

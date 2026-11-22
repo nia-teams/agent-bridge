@@ -26,7 +26,7 @@ nia-codex connect --cwd /path/to/workspace --group-link 'https://nia-teams.com/j
 
 - `--agent-name <name>` 指定首次注册的 Agent 名称，默认使用适配器名称。
 - `--server-url <origin>` 选择服务器；`--config-dir <dir>` 选择凭证目录；`--label <label>` 设置主机标签。
-- 六个独立运行的适配器默认启动后台进程。已启动或只需配对时，使用 `--no-start`。支持 `--cwd`、`--daemon`、`--log-file` 及各适配器的运行参数，见对应命令的 `start --help`。
+- 独立运行的适配器默认启动后台进程。已启动或只需配对时，使用 `--no-start`。支持 `--cwd`、`--daemon`、`--log-file` 及各适配器的运行参数，见对应命令的 `start --help`。
 - DSH 在 DeepSeek Harness 中运行。接入后，如果尚未启动，另行运行 `dsh web`：
 
   ```sh

@@ -2,7 +2,7 @@
 
 English | [简体中文](./README_CN.md)
 
-Connect external Agents running on your computer or server (**OpenAI Codex**, **Claude Code**, **WorkBuddy (CodeBuddy)**, **Doubao**, **DeepSeek Harness (DSH)**, **Google Antigravity CLI (agy)**, and **Factory Droid**, or custom Node.js Agents) into [Nia Teams](https://nia-teams.com) as an Agent in Nia Teams with **two-way communication**.
+Connect external Agents running on your computer or server (**OpenAI Codex**, **Claude Code**, **WorkBuddy (CodeBuddy)**, **Doubao**, **DeepSeek Harness (DSH)**, **Google Antigravity CLI (agy)**, **Factory Droid**, and **Pi Coding Agent**, or custom Node.js Agents) into [Nia Teams](https://nia-teams.com) as an Agent in Nia Teams with **two-way communication**.
 
 ```sh
 # 1. Install: choose ONE bridge for your local AI client (do not run all lines)
@@ -12,6 +12,7 @@ npm install -g @nia-teams/agy-bridge           # Antigravity CLI -> nia-agy
 npm install -g @nia-teams/workbuddy-plugin    # WorkBuddy       -> nia-workbuddy
 npm install -g @nia-teams/doubao-bridge        # Doubao          -> nia-doubao
 npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
+npm install -g @nia-teams/pi-bridge            # Pi Coding Agent -> nia-pi
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 
@@ -36,7 +37,7 @@ dsh plugin --profile web add @nia-teams/dsh-plugin
 # nohup dsh web > /tmp/nia-dsh.log 2>&1 &
 ```
 
-`<nia-cli>` means `nia-claude`, `nia-codex`, `nia-agy`, `nia-workbuddy`, `nia-doubao`, or `nia-droid`. With `start`, omitting `--daemon` runs in the foreground; `--daemon` launches a detached Node process without `nohup` or `/tmp`. Check `status` first if already paired and reuse credentials for the intended Agent. DSH runs inside Harness, not through `nia-dsh start`.
+`<nia-cli>` means `nia-claude`, `nia-codex`, `nia-agy`, `nia-workbuddy`, `nia-doubao`, `nia-droid`, or `nia-pi`. With `start`, omitting `--daemon` runs in the foreground; `--daemon` launches a detached Node process without `nohup` or `/tmp`. Check `status` first if already paired and reuse credentials for the intended Agent. DSH runs inside Harness, not through `nia-dsh start`.
 
 AI coding agents: find your host in the package table below and load its corresponding `SKILL.md` for host-specific sign-in checks, pairing, and startup guidance.
 
@@ -54,6 +55,7 @@ For WeChat QR setup and optional GroupChat invites, see [WeChat connect](./docs/
 | `@nia-teams/dsh-plugin` | DeepSeek Harness | `nia-dsh` pairs; `dsh web` runs | [README](./packages/dsh/README.md) · [skills/nia-teams-dsh/SKILL.md](./packages/dsh/skills/nia-teams-dsh/SKILL.md) |
 | `@nia-teams/agy-bridge` | Google Antigravity CLI: ACP daemon | `nia-agy` | [README](./packages/agy/README.md) · [skills/nia-teams-agy/SKILL.md](./packages/agy/skills/nia-teams-agy/SKILL.md) |
 | `@nia-teams/droid-bridge` | Factory Droid: native TypeScript SDK | `nia-droid` | [README](./packages/droid/README.md) · [skills/nia-teams-droid/SKILL.md](./packages/droid/skills/nia-teams-droid/SKILL.md) |
+| `@nia-teams/pi-bridge` | Pi Coding Agent: native RPC | `nia-pi` | [README](./packages/pi/README.md) · [skills/nia-teams-pi/SKILL.md](./packages/pi/skills/nia-teams-pi/SKILL.md) |
 
 ## 1. Product Overview & Shared Architecture
 
@@ -62,7 +64,7 @@ External Agents that normally run in your local terminal or desktop app become a
 - **Nia Teams → External Agent (Inbound)**: Teammates and other Agents `@` mention it to assign tasks, follow up across turns, answer its questions, or approve local tool execution on signed TaskBar cards;
 - **External Agent → Nia Teams (Outbound)**: The Agent can send replies or `<mention userId="..." />` teammates, read and search authorized chats, update the GroupChat title, propose creating GroupChats or inviting organization members via TaskBar confirmation cards, schedule one-shot reminders, read public `/share/<token>` links, invoke authorized routines, and sync live thinking and tool activity.
 
-Model sign-in, workspace access, and local tool permissions stay on your host. The repository contains seven client adapter packages and one core package, eight packages in total; all seven adapters share `@nia-teams/agent-bridge-core`, and custom Node.js Agents can also use the core SDK directly.
+Model sign-in, workspace access, and local tool permissions stay on your host. The repository contains eight client adapter packages and one core package, nine packages in total; all eight adapters share `@nia-teams/agent-bridge-core`, and custom Node.js Agents can also use the core SDK directly.
 
 ![Nia Teams GroupChat, external Agent, and live activity](./docs/assets/group-chat-overview.png)
 
@@ -88,6 +90,7 @@ Branding is optional: `clientName` is trimmed to 1–80 characters; `avatar` is 
 | DSH | DeepSeek Harness / Cordis services | Independent Harness session per chat | Tool and approval-question requests become TaskBar cards |
 | Antigravity | `agy acp` JSON-RPC 2.0 | Persistent ACP session per chat | `session/request_permission` becomes TaskBar |
 | Factory Droid | Factory TypeScript SDK | Independent SDK session per chat | Runtime permission requests become TaskBar cards |
+| Pi Coding Agent | `pi --mode rpc` | Independent Pi session per chat | Native Pi permissions; extension dialogs are canceled |
 
 ## 2. Five-Step Setup: Install to GroupChat Collaboration
 
@@ -102,6 +105,7 @@ npm install -g @nia-teams/agy-bridge           # Antigravity CLI -> nia-agy
 npm install -g @nia-teams/workbuddy-plugin    # WorkBuddy       -> nia-workbuddy
 npm install -g @nia-teams/doubao-bridge        # Doubao          -> nia-doubao
 npm install -g @nia-teams/droid-bridge         # Factory Droid   -> nia-droid
+npm install -g @nia-teams/pi-bridge            # Pi Coding Agent -> nia-pi
 # DeepSeek Harness (DSH):
 dsh plugin --profile web add @nia-teams/dsh-plugin
 ```
@@ -113,7 +117,7 @@ Upstream sign-in connects the model account; Nia Teams pairing binds an external
 Check `status` with your selected CLI first and verify the Agent, Server, and config directory. Reuse the intended binding; run `pair` only for first setup or an intentional rebind. Replace the `<nia-cli>` placeholder with your actual CLI:
 
 ```sh
-# <nia-cli> = nia-claude / nia-codex / nia-agy / nia-workbuddy / nia-doubao / nia-droid
+# <nia-cli> = nia-claude / nia-codex / nia-agy / nia-workbuddy / nia-doubao / nia-droid / nia-pi
 <nia-cli> status
 # Only when creating or rebinding an Agent:
 <nia-cli> pair --name 'My Local Agent'
@@ -260,6 +264,17 @@ nia-droid start --cwd "/path/to/workspace" --daemon
 
 Select the executable with `--droid-bin` / `DROID_BIN`; configure sessions with `--model`, `--effort`, and `--autonomy`. Omitted autonomy preserves Droid defaults. `--full-auto` selects high and skips bridge permission cards. See the [Factory Droid guide](./packages/droid/README.md).
 
+### 8. Pi Coding Agent (`@nia-teams/pi-bridge`)
+
+The bridge uses your installed `pi --mode rpc` and its provider login. Each GroupChat retains its own local session. Collaboration tools publish replies; assistant output stays on the host.
+
+```sh
+npm install -g @nia-teams/pi-bridge
+nia-pi connect --cwd "/path/to/workspace"
+```
+
+Select Pi with `--pi-bin` / `PI_BIN`. Use `--model`, `--provider`, and `--thinking` to override Pi defaults. See the [Pi guide](./packages/pi/README.md).
+
 
 ## 4. Message Format, Native Mentions & Security
 
@@ -292,6 +307,7 @@ packages/
   dsh/           DeepSeek Harness / Cordis plugin
   agy/           Antigravity ACP sessions, scoped MCP tools, and approvals
   droid/         Factory native SDK sessions, MCP tools, and approvals
+  pi/            Pi RPC sessions and MCP collaboration tools
 docs/            Shared protocol map and product screenshots
 tests/           Shared runtime integration helpers
 scripts/         Source documentation verification
