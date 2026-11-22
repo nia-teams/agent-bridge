@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createPublicKey } from 'node:crypto';
 import { stat, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once, EventEmitter } from 'node:events';
-import { connectWithWeChat, parseGroupInviteToken, connectRegistrationMessage, openBrowser, connectDaemonArgs } from '../dist/index.js';
+import { connectWithWeChat, parseGroupInviteToken, connectRegistrationMessage, loadCredentials, openBrowser, connectDaemonArgs } from '../dist/index.js';
 import { connectFixture, groupToken, startPath, statusPath, challengePath, joinPath } from './connect-fixture.mjs';
 
 test('canonical registration bytes retain nonce and token; no-token message ends in a newline', () => {
@@ -99,9 +100,12 @@ test('browser platform arguments, safe protocols and failure handling', async ()
     assert.equal(await openBrowser('https://nia-teams.com', { spawnImpl: () => { throw new Error('must not spawn'); } }), false);
   } finally { if (previous === undefined) delete process.env.NIA_NO_BROWSER; else process.env.NIA_NO_BROWSER = previous; }
 });
-test('first-time and reused connections open only the handoff URL', async t => {
+test('connections save credentials before opening a valid handoff or rejecting a cross-origin handoff', async t => {
   const f = await connectFixture(t);
+  const crossOrigin = await connectFixture(t);
+  crossOrigin.handoffUrl = 'https://unrelated.example/api/agent-bridge/handoff?code=fixture';
   const opener = `
+    import assert from 'node:assert/strict';
     import { EventEmitter } from 'node:events';
     import { existsSync } from 'node:fs';
     import { createRequire, syncBuiltinESMExports } from 'node:module';
@@ -116,6 +120,8 @@ test('first-time and reused connections open only the handoff URL', async t => {
     };
     syncBuiltinESMExports();
     const { connectWithWeChat } = await import(${JSON.stringify(new URL('../dist/index.js', import.meta.url).href)});
+    await assert.rejects(connectWithWeChat({ ...${JSON.stringify(crossOrigin.options)}, openBrowser: true }), /Invalid handoff URL/);
+    assert.deepEqual(calls, [], 'must not open the cross-origin handoff');
     const first = await connectWithWeChat({ ...options, openBrowser: true, onScan: () => {
       if (calls.length) throw new Error('Browser opened during QR setup');
     } });
@@ -130,6 +136,11 @@ test('first-time and reused connections open only the handoff URL', async t => {
   child.stdout.on('data', data => { stdout += data; });
   child.stderr.on('data', data => { stderr += data; });
   assert.equal((await once(child, 'close'))[0], 0, stderr);
+  assert.deepEqual(crossOrigin.requests.map(r => r.path), [startPath, statusPath]);
+  const saved = await loadCredentials(crossOrigin.dir);
+  assert.equal(saved.serverUrl, crossOrigin.url);
+  assert.equal(saved.publicKeyPem, crossOrigin.publicKey);
+  assert.equal(createPublicKey(saved.privateKeyPem).export({ type: 'spki', format: 'pem' }).trim(), crossOrigin.publicKey);
   assert.deepEqual(JSON.parse(stdout), { opened: [true, true, false, false], calls: [
     { url: f.defaultHandoffUrl, saved: true }, { url: f.defaultHandoffUrl, saved: true },
   ] });
@@ -157,11 +168,6 @@ for (const protocol of ['http:', 'https:']) test(`connect requires the ${protoco
   const invalidHandoffs = ['not a URL', handoff, 'javascript:alert(1)', `file://${handoff}`,
     `${protocol}//alice:secret@bridge.example${handoff}`, `${otherOrigin}${handoff}`, `${otherScheme}${handoff}`,
     `${serverUrl}:8443${handoff}`, `${serverUrl}/handoff?code=fixture`, `${serverUrl}/api/agent-bridge/handoff/`];
-  for (const url of invalidHandoffs) {
-    f.handoffUrl = url;
-    await assert.rejects(connectWithWeChat(options), /Invalid handoff URL/);
-    await assert.rejects(stat(path), { code: 'ENOENT' });
-  }
   f.handoffUrl = `${serverUrl}${handoff}`;
   const first = await connectWithWeChat({ ...options, onScan: info => {
     // The terminal QR payload may use a different WeChat provider origin.

@@ -117,12 +117,11 @@ function validateConnectUrl(value: string, serverUrl: string, purpose: 'WeChat Q
   }
 }
 
-function validateConnectedChat(chat: ConnectedChat, serverUrl: string): void {
+function validateConnectedChat(chat: ConnectedChat): void {
   for (const key of ['userId', 'teamId', 'agentSlug', 'agentName', 'groupChatId'] as const) {
     if (typeof chat[key] !== 'string' || !chat[key]) throw new Error(`Invalid connect response: ${key}`);
   }
   if (typeof chat.groupChatTitle !== 'string') throw new Error('Invalid connect response: groupChatTitle');
-  validateConnectUrl(chat.handoffUrl, serverUrl, 'handoff');
 }
 
 async function joinGroup(credentials: Credentials, groupInviteToken?: string, signal?: AbortSignal): Promise<ConnectedChat> {
@@ -148,7 +147,7 @@ async function joinGroup(credentials: Credentials, groupInviteToken?: string, si
     throw error;
   }
   if (chat.ok !== true || chat.teamId !== teamId) throw new Error('Connect response does not match existing Agent');
-  validateConnectedChat(chat, serverUrl);
+  validateConnectedChat(chat);
   return chat;
 }
 
@@ -195,7 +194,7 @@ async function registerWithWeChat(serverUrl: string, configDir: string, options:
         continue;
       }
       if (chat.status !== 'complete') throw new Error('Unexpected connect status');
-      validateConnectedChat(chat, serverUrl);
+      validateConnectedChat(chat);
       if (!/^[a-f\d]{24}$/i.test(chat.teamId) || typeof chat.issuer !== 'string' || !chat.issuer || chat.keyGeneration !== 1) {
         throw new Error('Invalid paired Agent identity in connect response');
       }
@@ -224,6 +223,8 @@ export async function connectWithWeChat(options: ConnectOptions = {}): Promise<C
   const { chat, credentials } = reused
     ? { chat: await joinGroup(reused, groupInviteToken, options.signal), credentials: reused }
     : await registerWithWeChat(serverUrl, configDir, options, groupInviteToken);
+  // Pairing has committed remotely; keep the saved key even if handoff fails.
+  validateConnectUrl(chat.handoffUrl, serverUrl, 'handoff');
   const browserOpened = options.openBrowser !== false && await openBrowser(chat.handoffUrl);
   return { mode: reused ? 'reused' : 'paired', credentials, userId: chat.userId, groupChatId: chat.groupChatId,
     groupChatTitle: chat.groupChatTitle, handoffUrl: chat.handoffUrl, browserOpened };

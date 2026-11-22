@@ -1,6 +1,6 @@
 {
   "name": "@nia-teams/droid-bridge",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -33,7 +33,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@nia-teams/agent-bridge-core": "^0.3.4",
+    "@nia-teams/agent-bridge-core": "^0.3.5",
     "@factory/droid-sdk": "^0.10.0"
   },
   "author": "Nia Teams",
