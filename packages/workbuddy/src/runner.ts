@@ -6,6 +6,19 @@ import { constants, existsSync } from 'node:fs';
 import { access, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 export interface WorkBuddyOptions { cwd: string; model?: string; fullAuto?: boolean; codebuddyBin?: string }
+const autoModels = new Set(['auto', 'auto-chat', 'fast-model', 'balanced-model', 'deep-model']);
+const genericModels = new Set(['default-model', 'primary-model']);
+const modelHint = 'Pass --model <model-id> or set CODEBUDDY_MODEL to a concrete model ID available to your account (e.g. glm-5.3, kimi-k2.6, or deepseek-v4.1-flash).';
+
+export function resolveWorkBuddyModel(explicit?: string): string {
+  const model = (explicit ?? process.env.CODEBUDDY_MODEL)?.trim();
+  if (!model) throw new Error(`No WorkBuddy model specified. Without one, WorkBuddy can fall back to Auto routing, which can loop on MCP tool calls under large context. ${modelHint}`);
+  const normalized = model.toLowerCase();
+  if (autoModels.has(normalized)) throw new Error(`WorkBuddy model ${JSON.stringify(model)} uses Auto routing and is not supported by nia-workbuddy. ${modelHint}`);
+  if (genericModels.has(normalized)) throw new Error(`WorkBuddy model ${JSON.stringify(model)} is a generic alias, not a concrete model ID. ${modelHint}`);
+  return model;
+}
+
 export async function resolveCodeBuddyBinary(explicit?: string): Promise<string> {
   const selected = explicit ?? process.env.CODEBUDDY_BIN;
   // SDK scripts are read by Node, not executed by the OS; dist/*.mjs need no +x.
@@ -168,6 +181,7 @@ async function workBuddyEnvironment(binary: string, signal: AbortSignal): Promis
   return env;
 }
 export function createWorkBuddyRunner(options: WorkBuddyOptions): TurnRunner {
+  const model = resolveWorkBuddyModel(options.model);
   return async context => {
     const binary = await resolveCodeBuddyBinary(options.codebuddyBin);
     context.signal.throwIfAborted();
@@ -181,7 +195,7 @@ export function createWorkBuddyRunner(options: WorkBuddyOptions): TurnRunner {
     const deferred = new ToolHttpServer({ ...context, tools: context.tools.filter(t => t.deferLoading) });
     try {
       return await consumeSdkQuery(query({ prompt: context.prompt, options: {
-        pathToCodebuddyCode: binary, env, cwd: options.cwd, model: options.model, resume: context.resume,
+        pathToCodebuddyCode: binary, env, cwd: options.cwd, model, resume: context.resume,
         abortController: controller, permissionMode: options.fullAuto ? 'bypassPermissions' : 'default', allowDangerouslySkipPermissions: Boolean(options.fullAuto),
         settingSources: ['user', 'project', 'local'], systemPrompt: { append: context.systemPrompt },
         mcpServers: { nia: server as unknown as import('@tencent-ai/agent-sdk').McpSdkServerConfig, ...(context.tools.some(t => t.deferLoading) ? { nia_deferred: await deferred.start() } : {}) },

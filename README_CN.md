@@ -40,6 +40,8 @@ dsh plugin --profile web add @nia-teams/dsh-plugin
 
 `<nia-cli>` 指 `nia-claude`、`nia-codex`、`nia-agy`、`nia-workbuddy`、`nia-doubao`、`nia-droid` 或 `nia-pi`。`start` 不加 `--daemon` 时在前台运行；`--daemon` 由 Node 后台启动，不依赖 `nohup` 或 `/tmp`。已有配对时先检查 `status`，复用目标 Agent 的凭证；DSH 由 Harness 宿主运行，不使用 `nia-dsh start`。
 
+WorkBuddy 启动时须添加 `--model <model-id>` 或设置 `CODEBUDDY_MODEL`，以选择账号可用的具体模型；仅配对可用 `nia-workbuddy connect --no-start`。
+
 AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `SKILL.md`；各平台的 Skill 提供专属登录检查、配对与启动指引。
 
 使用微信扫码接入，或通过群聊邀请链接加入已有群聊，见[微信扫码接入](./docs/WECHAT-CONNECT_CN.md)。
@@ -217,7 +219,7 @@ nia-claude start --cwd "/path/to/workspace" --daemon
 发现 `WorkBuddy.app` 内置的 `codebuddy-lite-wb.mjs`，通过 `ELECTRON_RUN_AS_NODE=1` 解密桌面已有登录，不启动 UI 或抢占焦点。也可指定独立 CodeBuddy CLI。SDK 会话按群恢复；工具请求和提问通过 TaskBar 或群聊处理。
 
 ```sh
-nia-workbuddy start --cwd "/path/to/workspace" --daemon
+nia-workbuddy start --cwd "/path/to/workspace" --daemon --model "<model-id>"
 ```
 
 ### 4. 豆包工作 / 豆包 CLI（`@nia-teams/doubao-bridge`）

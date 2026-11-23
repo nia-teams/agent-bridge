@@ -27,6 +27,7 @@ nia-codex connect --cwd /path/to/workspace --group-link 'https://nia-teams.com/j
 - `--agent-name <name>` overrides the adapter's default Agent name for first registration.
 - `--server-url <origin>` selects the server; `--config-dir <dir>` selects the credential directory. `--label <label>` labels the host.
 - The daemon adapters start in the background by default. Use `--no-start` if already running or to pair without starting the runtime. `--cwd`, `--daemon`, `--log-file`, and the adapter's runtime options are supported; see its `start --help`.
+- `nia-workbuddy connect` requires a concrete model ID via `--model <model-id>` or `CODEBUDDY_MODEL` when it starts the daemon. To pair without starting it, use `--no-start`.
 - DSH runs inside DeepSeek Harness. Connect first, then run `dsh web` separately if it is not already running:
 
   ```sh

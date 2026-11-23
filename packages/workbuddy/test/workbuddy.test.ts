@@ -14,7 +14,7 @@ const { build } = require('esbuild');
 test('WorkBuddy runner passes bundle and configuration overrides to SDK query', async t => {
   const home = await mkdtemp(join(tmpdir(), 'workbuddy-env-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const keys = ['CODEBUDDY_CONFIG_DIR', 'WORKBUDDY_CONFIG_DIR', 'ACC_PRODUCT_CONFIG_PATH', 'CODEBUDDY_FORCE_LITE_WB_BUNDLE', 'CODEBUDDY_FORCE_HEADLESS_BUNDLE', 'CODEBUDDY_AUTH_TOKEN', 'ACC_USER_ID', 'ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'LOCALAPPDATA'];
+  const keys = ['CODEBUDDY_CONFIG_DIR', 'WORKBUDDY_CONFIG_DIR', 'ACC_PRODUCT_CONFIG_PATH', 'CODEBUDDY_FORCE_LITE_WB_BUNDLE', 'CODEBUDDY_FORCE_HEADLESS_BUNDLE', 'CODEBUDDY_AUTH_TOKEN', 'ACC_USER_ID', 'ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'LOCALAPPDATA', 'CODEBUDDY_MODEL'];
   const original = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   t.after(() => {
     for (const key of keys) {
@@ -44,8 +44,8 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
   const createWorkBuddyRunner = await loadRunner();
   const appBinary = '/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy';
   const defaultDir = join(home, '.workbuddy');
-  async function invoke(binary = appBinary, signal = new AbortController().signal) {
-    return createWorkBuddyRunner({ cwd: home, codebuddyBin: binary })({
+  async function invoke(binary = appBinary, signal = new AbortController().signal, model = 'glm-5.3') {
+    return createWorkBuddyRunner({ cwd: home, codebuddyBin: binary, ...(model === null ? {} : { model }) })({
       prompt: 'hello', signal, systemPrompt: 'server', tools: [{ name: 'send_message', description: 'send', inputSchema: { type: 'object' } }, { name: 'chat_history', description: 'history', inputSchema: { type: 'object' } }],
       send: async () => {}, history: async () => [], permission: async () => ({ behavior: 'allow' }),
     });
@@ -53,6 +53,29 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
   function expected(configDir) {
     return { CODEBUDDY_FORCE_LITE_WB_BUNDLE: '1', CODEBUDDY_FORCE_HEADLESS_BUNDLE: '1', CODEBUDDY_CONFIG_DIR: configDir, WORKBUDDY_CONFIG_DIR: configDir };
   }
+  await t.test('requires a concrete model before constructing an SDK runner', () => {
+    const options = { cwd: home };
+    const hint = /--model <model-id> or set CODEBUDDY_MODEL/;
+    assert.throws(() => createWorkBuddyRunner(options), hint);
+    for (const model of ['auto', 'auto-chat', 'fast-model', 'balanced-model', 'deep-model', ' AuTo-ChAt ']) {
+      assert.throws(() => createWorkBuddyRunner({ ...options, model }), /uses Auto routing/);
+    }
+    for (const model of ['DEFAULT-MODEL', 'primary-model']) {
+      assert.throws(() => createWorkBuddyRunner({ ...options, model }), /generic alias/);
+    }
+    process.env.CODEBUDDY_MODEL = '  FaSt-MoDeL ';
+    try {
+      assert.throws(() => createWorkBuddyRunner(options), /uses Auto routing/);
+      assert.throws(() => createWorkBuddyRunner({ ...options, model: '  ' }), hint);
+    } finally { delete process.env.CODEBUDDY_MODEL; }
+  });
+  await t.test('passes the trimmed explicit or environment model to SDK query', async () => {
+    process.env.CODEBUDDY_MODEL = '  kimi-k2.6  ';
+    try {
+      assert.equal((await invoke(appBinary, undefined, '  glm-5.3  ')).options.model, 'glm-5.3');
+      assert.equal((await invoke(appBinary, undefined, null)).options.model, 'kimi-k2.6');
+    } finally { delete process.env.CODEBUDDY_MODEL; }
+  });
   await t.test('ordinary CLI without ~/.workbuddy retains SDK environment defaults', async () => {
     assert.equal((await invoke('/usr/local/bin/codebuddy')).options.env, undefined);
   });
@@ -144,7 +167,7 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, 'login.info'), JSON.stringify({ auth: { accessToken: platformName + '-token' } }));
       const runner = await loadRunner(platformName);
-      const result = await runner({ cwd: home, codebuddyBin: appBinary })({ systemPrompt: 'Server GroupChat policy', tools: [{ name: 'send_message', description: 'send', inputSchema: { type: 'object' } }, { name: 'chat_history', description: 'history', inputSchema: { type: 'object' } }], prompt: 'hi', signal: new AbortController().signal });
+      const result = await runner({ cwd: home, codebuddyBin: appBinary, model: 'glm-5.3' })({ systemPrompt: 'Server GroupChat policy', tools: [{ name: 'send_message', description: 'send', inputSchema: { type: 'object' } }, { name: 'chat_history', description: 'history', inputSchema: { type: 'object' } }], prompt: 'hi', signal: new AbortController().signal });
       assert.equal(result.options.env.CODEBUDDY_AUTH_TOKEN, platformName + '-token');
     }
     delete process.env.LOCALAPPDATA;
@@ -298,7 +321,7 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
   const entries = async () => (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   const invoke = async (selected, extra = {}, overrides = {}) => {
     const sessions = [], sends = [], permissions = [];
-    const result = await createWorkBuddyRunner({ cwd: root, codebuddyBin: selected, ...extra })({
+    const result = await createWorkBuddyRunner({ cwd: root, codebuddyBin: selected, model: 'glm-5.3', ...extra })({
       systemPrompt: 'Server GroupChat policy', tools: [{ name: 'send_message', description: 'send', inputSchema: { type: 'object' } }, { name: 'chat_history', description: 'history', inputSchema: { type: 'object' } }],
       prompt: 'hello', signal: new AbortController().signal,
       session: async id => { sessions.push(id); }, activity: async () => {},
@@ -326,6 +349,7 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
     assert.ok(turn.spawn.args.includes('--input-format=stream-json'));
     assert.ok(turn.spawn.args.includes('--output-format=stream-json'));
     assert.ok(turn.spawn.args.includes('user,project,local'));
+    assert.deepEqual(turn.spawn.args.slice(turn.spawn.args.indexOf('--model'), turn.spawn.args.indexOf('--model') + 2), ['--model', 'glm-5.3']);
     assert.deepEqual((await readdir(join(cli, 'dist'))).sort(), ['codebuddy-lite-wb.mjs', 'lazy-lite-wb']);
   });
   await t.test('direct non-executable .mjs and CODEBUDDY_BIN use the same SDK entrypoint', async () => {
@@ -352,9 +376,10 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
     const init = records.find(e => e.kind === 'in' && e.message.request?.subtype === 'initialize').message.request;
     assert.deepEqual(init.sdkMcpServers, ['nia']);
     assert.match(init.appendSystemPrompt, /GroupChat/);
-    const resumed = await invoke(binary, { fullAuto: true }, { resume: first.sessions[0] });
+    const resumed = await invoke(binary, { fullAuto: true, model: 'kimi-k2.6' }, { resume: first.sessions[0] });
     assert.equal(resumed.sessions[0], first.sessions[0]);
     assert.equal(resumed.spawn.args[resumed.spawn.args.indexOf('--resume') + 1], first.sessions[0]);
+    assert.equal(resumed.spawn.args[resumed.spawn.args.indexOf('--model') + 1], 'kimi-k2.6');
     assert.equal(resumed.spawn.args[resumed.spawn.args.indexOf('--permission-mode') + 1], 'bypassPermissions');
   });
   await t.test('standard bin/codebuddy still uses its installed headless bundle', async () => {
@@ -377,7 +402,7 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
     const { BridgeClient, SessionHost } = await import(pathToFileURL(join(process.cwd(), '../core/dist/index.js')).href);
     const f = await bridgeFixture(t), errors = [];
     const bridge = new BridgeClient(f.credentials);
-    const host = new SessionHost(bridge, createWorkBuddyRunner({ cwd: root, codebuddyBin: binary }), {
+    const host = new SessionHost(bridge, createWorkBuddyRunner({ cwd: root, codebuddyBin: binary, model: 'glm-5.3' }), {
       configDir: f.dir, runtime: 'WorkBuddy', approvalTool: 'workbuddy.approval', onError: error => errors.push(error),
     });
     t.after(async () => { await host.close(); bridge.close(); });

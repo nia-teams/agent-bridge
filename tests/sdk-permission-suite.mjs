@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
-export function sdkPermissionSuite(runtime, runnerUrl, sdk, factory, binKey, assertOptions = () => {}) {
+export function sdkPermissionSuite(runtime, runnerUrl, sdk, factory, binKey, assertOptions = () => {}, runnerOptions = {}) {
   test(`${runtime}: scoped Nia tools use canUseTool without shadowing or bypassing other approvals`, async () => {
     const require = createRequire(import.meta.url);
     let captured; let listed; let called; let deferredListed; let deferredResult;
@@ -39,7 +39,7 @@ export function sdkPermissionSuite(runtime, runnerUrl, sdk, factory, binKey, ass
     try {
       const runner = (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`))[factory];
       const permissions = [];
-      await runner({ cwd: process.cwd(), [binKey]: fileURLToPath(new URL('./fixtures/mock-sdk-cli.mjs', import.meta.url)) })({
+      await runner({ ...runnerOptions, cwd: process.cwd(), [binKey]: fileURLToPath(new URL('./fixtures/mock-sdk-cli.mjs', import.meta.url)) })({
         ...contract, tools: definitions, deliveryId: 'test', prompt: 'hello', signal: new AbortController().signal, session: async () => {},
         callTool: async name => ({ content: name === 'future_tool' ? '{"future":true}' : '{"history":[]}', ...(name === 'future_tool' ? { isError: true } : {}) }),
         permission: async (...args) => { permissions.push(args); return { behavior: 'deny', message: 'Needs approval' }; },

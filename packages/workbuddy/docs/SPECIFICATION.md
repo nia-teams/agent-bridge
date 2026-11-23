@@ -4,12 +4,14 @@ Inspected npm `@tencent-ai/agent-sdk@0.3.300` and `@tencent-ai/codebuddy-code@2.
 
 - `query({ prompt, options })` is AsyncIterable of system/assistant/result messages. `session_id` identifies the durable runtime conversation; `resume` restores it. Success carries `type: "result", subtype: "success", result: string`; errors carry `is_error`/`errors`.
 - Executable override: `pathToCodebuddyCode`. There is no `pathToCodeBuddyExecutable` option. Options include `cwd`, `model`, `abortController`, `canUseTool`, `mcpServers`, `permissionMode`, `settingSources`, `env`.
-- SDK transport uses `--input-format=stream-json --output-format=stream-json --verbose`, `--resume`, `--setting-sources`, `--permission-mode`; it chooses Node for JS launchers and direct execution for `.exe`.
+- SDK transport uses `--input-format=stream-json --output-format=stream-json --verbose`, `--model <model-id>`, `--resume`, `--setting-sources`, `--permission-mode`; it chooses Node for JS launchers and direct execution for `.exe`.
 - SDK initialize control request carries `sdkMcpServers` and `capabilities.askUserQuestion: true`. A low-level MCP `Server` preserves handshake JSON Schemas and returns string content without re-encoding.
 - CLI → SDK `control_request.request.subtype: "can_use_tool"` includes `tool_name`, `input`, `tool_use_id`. Callback is `(toolName, input, { signal, toolUseID, ... })`. SDK callbacks return `{ behavior: "allow", updatedInput }` or `{ behavior: "deny", message }`; SDK translates these to its own `{ allowed, ... }` wire response. Do not substitute Claude's control response shape.
 - Cancellation sets AbortController and calls query `interrupt()`; upstream returns a terminal result and cleans up the transport. Cancellation is cooperative with the selected CLI.
 - `AskUserQuestion` can surface through this callback. Answers are supplied in `updatedInput.answers`, keyed by question text.
 - SDK defaults setting sources to `none`; bridge explicitly enables user/project/local to preserve local settings. `CODEBUDDY_CONFIG_DIR`, `WORKBUDDY_CONFIG_DIR`, `CODEBUDDY_AUTH_TOKEN`, `CODEBUDDY_API_KEY` and the selected build's product authentication are inherited, not synthesized. CodeBuddy standard data is `.codebuddy`; WorkBuddy product-specific configuration uses `.workbuddy` (including models.json). Sharing Desktop auth is not presumed for a different CodeBuddy build.
+
+`start` and autostarting `connect` resolve `--model` first, then `CODEBUDDY_MODEL`, trim the selected value, and reject missing or blank values before pairing or spawning. The runner applies the same check to embedded callers. It rejects `auto`, `auto-chat`, `fast-model`, `balanced-model`, and `deep-model` as Auto routing IDs, and `default-model` and `primary-model` as generic aliases (case-insensitive). The selected concrete ID is supplied as SDK `options.model` on new and resumed queries; the SDK sends it to the child as `--model <model-id>`. `connect --no-start`, `pair`, and `status` do not resolve a model.
 
 SHA256:
 

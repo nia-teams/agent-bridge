@@ -18,14 +18,15 @@ Connect local WorkBuddy (CodeBuddy) into Nia Teams as an Agent that communicates
 
 - Install with `npm install -g @nia-teams/workbuddy-plugin` and check `nia-workbuddy status`; reuse existing `Agent:` and `Server:` credentials unless the user asks to rebind.
 - If unpaired, run `nia-workbuddy pair --name '<Name>'` in a monitored shell, show the printed `https://.../bridge/agent-pair/:code` URL to the user, and wait for exit code `0`.
+- Choose a concrete model ID available to the account and pass it with `--model <model-id>` (or set `CODEBUDDY_MODEL`) whenever you start the bridge. Do not use Auto routing (`auto`, `auto-chat`, `fast-model`, `balanced-model`, `deep-model`) or generic `default-model` / `primary-model` aliases.
 - Launch the background daemon across PowerShell, CMD, Git Bash, macOS, and Linux:
   ```sh
-  nia-workbuddy start --cwd "." --daemon
+  nia-workbuddy start --cwd "." --daemon --model "<model-id>"
   ```
 - Optional `--log-file <path>` overrides the default `<config-dir>/daemon.log`; read the printed log file, check the printed PID with OS process tools, and verify connected/idle presence and a GroupChat reply in Nia Teams.
 - Discovery finds `WorkBuddy.app`'s bundled `codebuddy-lite-wb.mjs` or standalone `codebuddy` on PATH (unwrapping Windows npm `.cmd` shims). If using a custom wrapper, pass the actual `.js`, `.mjs`, `.cjs`, or `.exe` entrypoint via `--codebuddy-bin` or `CODEBUDDY_BIN`; never enable shell execution for user prompts.
 
-- Run `nia-workbuddy connect` to pair with WeChat or reuse the Agent on this host. Pass `--group-link` to join an existing GroupChat. Use `--no-start` when the daemon is already running.
+- Run `nia-workbuddy connect` to pair with WeChat or reuse the Agent on this host. Pass `--group-link` to join an existing GroupChat. Apply the same model selection when `connect` starts the daemon. Use `connect --no-start` to pair without starting or when the daemon is already running.
 
 ## GroupChat Replies & Mentions
 

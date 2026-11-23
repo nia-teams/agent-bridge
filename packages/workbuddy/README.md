@@ -7,8 +7,10 @@ Connect **WorkBuddy (CodeBuddy)** into [Nia Teams](https://nia-teams.com) as an 
 ```sh
 npm install -g @nia-teams/workbuddy-plugin
 nia-workbuddy pair --name 'My WorkBuddy / CodeBuddy'
-nia-workbuddy start --cwd "." --daemon
+nia-workbuddy start --cwd "." --daemon --model "<model-id>"
 ```
+
+Replace `<model-id>` with a concrete model ID available to your account, such as `glm-5.3`. You can omit `--model` if `CODEBUDDY_MODEL` is set.
 
 AI coding agents: load [skills/nia-teams-workbuddy/SKILL.md](./skills/nia-teams-workbuddy/SKILL.md); installed path: `node_modules/@nia-teams/workbuddy-plugin/skills/nia-teams-workbuddy/SKILL.md`.
 
@@ -89,17 +91,17 @@ nia-workbuddy status
 For manual operation, run in an interactive foreground terminal with logs visible:
 
 ```sh
-nia-workbuddy start --cwd /path/to/workspace
+nia-workbuddy start --cwd /path/to/workspace --model "<model-id>"
 ```
 
 For detached operation or local AI setup, launch in the background:
 
 ```sh
 # Portable background launch (Windows PowerShell/CMD/Git Bash, macOS, Linux):
-nia-workbuddy start --cwd "/path/to/workspace" --daemon
+nia-workbuddy start --cwd "/path/to/workspace" --daemon --model "<model-id>"
 
 # POSIX-only alternative (not Windows):
-nohup nia-workbuddy start --cwd /path/to/workspace > /tmp/nia-workbuddy.log 2>&1 &
+nohup nia-workbuddy start --cwd /path/to/workspace --model "<model-id>" > /tmp/nia-workbuddy.log 2>&1 &
 sleep 2
 cat /tmp/nia-workbuddy.log
 pgrep -af '[n]ia-workbuddy.*start'
@@ -139,6 +141,7 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 
 ### Troubleshooting
 
+- **Startup reports a missing model or rejects a model alias**: Use CodeBuddy’s `/model` to find an available model and pass its concrete ID with `--model` or `CODEBUDDY_MODEL`. To pair without starting, use `nia-workbuddy connect --no-start`.
 - **Pairing request expired**: Links last 10 minutes. Run `nia-workbuddy pair` again on the host and open the new URL.
 - **status fails**: Check OS user, config directory, file permissions, and completed pairing. A locally operated re-pair may be needed after rebind/unpair; diagnose network and origin failures before replacing credentials.
 - **Chat stays red Disconnected**: Inspect the daemon, `/tmp/nia-workbuddy.log`, saved Server, and chat Agent identity. Check for another process using the credentials. Close code `4409` means another connection took over.
@@ -148,9 +151,10 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 ## 3. CLI, Environment & Package Exports
 
 ```text
+nia-workbuddy connect [--cwd <dir>] [--model <model-id>] [--no-start] [--group-link <url-or-token>]
 nia-workbuddy pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-workbuddy status [--config-dir <dir>]
-nia-workbuddy start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
+nia-workbuddy start [--cwd <dir>] [--config-dir <dir>] [--model <model-id>]
                    [--full-auto] [--codebuddy-bin <path>]
 nia-workbuddy --help
 ```
@@ -159,7 +163,7 @@ nia-workbuddy --help
 - `--config-dir`: Explicit path overrides `NIA_WORKBUDDY_CONFIG_DIR` and defaults to `~/.config/nia-teams-workbuddy`. Use the same directory for pair, status, and start.
 - `--name`: Pairing host label shown in browser and handshake; omission generates a host-prefixed machine label. The Agent display name can be changed in the browser.
 - `--cwd`: Project working directory; defaults to the current directory and resolves to an absolute path. It does not move credentials.
-- `--model`: Model name passed to the selected CodeBuddy runtime; available models depend on the CodeBuddy account and settings.
+- `--model` / `CODEBUDDY_MODEL`: Starting the daemon, including via `connect`, requires a concrete model ID available to your account. `--model` takes precedence over `CODEBUDDY_MODEL`; surrounding whitespace is trimmed. Auto routing (`auto`, `auto-chat`, `fast-model`, `balanced-model`, `deep-model`) can lead to repeated MCP tool calls in long conversations. The bridge rejects those IDs as well as the generic aliases `default-model` and `primary-model`. `connect --no-start`, `pair`, and `status` do not require a model.
 - `--help` / `-h`: Show command overview; no command also displays help.
 - `--codebuddy-bin / CODEBUDDY_BIN`: Select a CodeBuddy executable or readable `.mjs` / `.js` entry.
 - `--full-auto`: Disable bridge tool confirmations.
