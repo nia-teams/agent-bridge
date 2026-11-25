@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SessionHost, consumeSdkQuery, BridgeClient, resolveThreadPrompt, formatThreadMessage } from '../dist/index.js';
+import { join } from 'node:path';
+import { writeFile, readFile } from 'node:fs/promises';
+import { SessionHost, RuntimeMissingResultError, consumeSdkQuery, BridgeClient, resolveThreadPrompt, formatThreadMessage } from '../dist/index.js';
 import { fixture, message, until, contract } from './helpers.mjs';
 
 test('activity transport failures cannot turn a successful SDK result into a failed turn', async t => {
@@ -257,3 +259,48 @@ for (const cancelAfterReady of [false, true]) test(`cancel during queued error i
   await host.close();
   assert.deepEqual(errors.map(e => e.message), ['runtime failed before cancellation']);
 });
+
+for (const scenario of ['changed cwd', 'same cwd', 'stale legacy', 'fresh retry fails', 'OIDC auth', 'after send', 'after tool', 'after SDK tool']) {
+  test(`cwd-aware resume: ${scenario}`, async t => {
+    const f = await fixture(t), errors = [], attempts = [];
+    const frame = message();
+    const cwd = join(f.dir, 'current');
+    const entry = { sessionId: 'saved', groupChatId: frame.groupChatId, updatedAt: 'old' };
+    if (scenario === 'changed cwd') entry.cwd = join(f.dir, 'old');
+    if (scenario === 'same cwd') entry.cwd = (process.platform === 'win32' ? cwd.toUpperCase() : cwd) + '/subdir/..';
+    const path = join(f.dir, 'threads.json');
+    await writeFile(path, JSON.stringify({ [frame.agentThreadId]: entry }), { mode: 0o600 });
+    const saved = async () => JSON.parse(await readFile(path, 'utf8'))[frame.agentThreadId];
+    const bridge = new BridgeClient(f.credentials);
+    const host = new SessionHost(bridge, async context => {
+      attempts.push(context.resume);
+      if (scenario === 'stale legacy' && context.resume) throw new RuntimeMissingResultError(false, 'No session found');
+      if (scenario === 'fresh retry fails') throw new Error('Runtime stream ended without a result');
+      if (scenario === 'OIDC auth') throw new Error('WorkBuddy desktop authentication expired or invalid (Invalid OIDC token).');
+      if (scenario === 'after send') { await context.send('Already published'); throw new RuntimeMissingResultError(false); }
+      if (scenario === 'after tool') { await context.history(); throw new RuntimeMissingResultError(false); }
+      if (scenario === 'after SDK tool') return consumeSdkQuery({ async *[Symbol.asyncIterator]() { yield { type: 'tool_progress', tool_name: 'Bash' }; } }, context);
+      if (scenario === 'stale legacy') assert.equal(await saved(), undefined);
+      await context.session(context.resume ?? 'new');
+    }, { configDir: f.dir, cwd, runtime: 'Test', approvalTool: 'test', onError: e => errors.push(e) });
+    t.after(async () => { await host.close(); bridge.close(); });
+    await host.start(); await bridge.start(); f.send(frame);
+    const idle = () => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === 'idle');
+    await until(() => idle().length === 1);
+    switch (scenario) {
+      case 'changed cwd': assert.deepEqual(attempts, [undefined]); break;
+      case 'stale legacy': case 'fresh retry fails': assert.deepEqual(attempts, ['saved', undefined]); break;
+      default: assert.deepEqual(attempts, ['saved']);
+    }
+    if (['changed cwd', 'same cwd', 'stale legacy'].includes(scenario)) {
+      assert.deepEqual(errors, []);
+      const stored = await saved();
+      assert.equal(stored.sessionId, scenario === 'same cwd' ? 'saved' : 'new');
+      assert.equal(stored.cwd, cwd);
+    } else {
+      assert.match(idle()[0].params.errorMessage, /Invalid OIDC token|Runtime stream ended without a result/);
+      assert.equal(errors.length, 1);
+      assert.deepEqual(await saved(), scenario === 'fresh retry fails' ? undefined : entry);
+    }
+  });
+}

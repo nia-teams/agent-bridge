@@ -31,5 +31,6 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (await maybeRespawnDaemon(args, resolve(configDir, 'daemon.log'))) return;
   await resolveDroidBinary(values['droid-bin']);
 
-  await runSessionDaemon(createDroidRunner({ cwd: resolve(values.cwd ?? process.cwd()), model: values.model, effort: values.effort, autonomy: values.autonomy, fullAuto: values['full-auto'], droidBin: values['droid-bin'] }), { ...clientBranding, configDir, runtime: 'Factory Droid', approvalTool: 'droid.approval', fullAuto: values['full-auto'] });
+  const cwd = resolve(values.cwd ?? process.cwd());
+  await runSessionDaemon(createDroidRunner({ cwd, model: values.model, effort: values.effort, autonomy: values.autonomy, fullAuto: values['full-auto'], droidBin: values['droid-bin'] }), { ...clientBranding, configDir, cwd, runtime: 'Factory Droid', approvalTool: 'droid.approval', fullAuto: values['full-auto'] });
 }

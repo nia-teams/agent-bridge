@@ -37,8 +37,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     if (await maybeRespawnDaemon(args, resolve(values['config-dir'] ?? defaultConfigDir(), 'daemon.log'))) return;
     const { createClaudeRunner, resolveClaudeBinary } = await import('./runner.js');
     await resolveClaudeBinary(values['claude-bin']);
-    await runSessionDaemon(createClaudeRunner({ cwd: resolve(values.cwd ?? process.cwd()), model: values.model, fullAuto: values['full-auto'], claudeBin: values['claude-bin'] }), {
-      ...clientBranding, configDir: resolve(values['config-dir'] ?? defaultConfigDir()), runtime: 'Claude Code', approvalTool: 'claude_code.permission', fullAuto: values['full-auto'],
+    const cwd = resolve(values.cwd ?? process.cwd());
+    await runSessionDaemon(createClaudeRunner({ cwd, model: values.model, fullAuto: values['full-auto'], claudeBin: values['claude-bin'] }), {
+      ...clientBranding, configDir: resolve(values['config-dir'] ?? defaultConfigDir()), cwd, runtime: 'Claude Code', approvalTool: 'claude_code.permission', fullAuto: values['full-auto'],
     });
   } else if (positionals[0] === 'status') {
     const credentials = await loadCredentials(values['config-dir']);

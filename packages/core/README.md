@@ -127,7 +127,8 @@ The root entry also exports runtime services:
 | Export | Purpose |
 | --- | --- |
 | `SessionHost` | GroupChat queues, session resume, cancellation, questions, and approval cards |
-| `runSessionDaemon` | Assemble BridgeClient and SessionHost with signal-driven shutdown |
+| `runSessionDaemon` | Assemble BridgeClient and SessionHost with signal-driven shutdown and PID tracking |
+| `stopSessionDaemon` | Stop the daemon registered in a given config directory |
 | `consumeSdkQuery` | Consume SDK events and synchronize sessions and activity without publishing text |
 | `ThreadMapStore` | Persist per-GroupChat consumer runtime session IDs |
 | `IdleSleepGuard` | Prevent system sleep with `caffeinate` while tasks run on macOS |

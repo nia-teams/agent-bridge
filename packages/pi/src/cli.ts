@@ -18,7 +18,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (values.help || positionals.length === 0) { console.log(usage); return; }
   if (positionals.length !== 1) throw new Error('Expected one command');
   const configDir = resolve(values['config-dir'] ?? defaultConfigDir('nia-teams-pi', 'NIA_PI_CONFIG_DIR'));
-  const runtime = { cwd: values.cwd ?? process.cwd(), configDir, model: values.model, provider: values.provider, thinking: values.thinking, piBin: values['pi-bin'] };
+  const runtime = { cwd: resolve(values.cwd ?? process.cwd()), configDir, model: values.model, provider: values.provider, thinking: values.thinking, piBin: values['pi-bin'] };
   validatePiOptions(runtime);
   const identity = { ...PI_BRANDING, configDir, hostPrefix: 'pi', serverUrl: values['server-url'], hostLabel: values.name };
   const log = resolve(configDir, 'daemon.log');
@@ -39,7 +39,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     case 'start':
       runtime.piBin = await resolvePiBinary(runtime.piBin);
       if (await maybeRespawnDaemon(args, log)) return;
-      await runSessionDaemon(createPiRunner(runtime), { ...PI_BRANDING, configDir, runtime: 'Pi', approvalTool: 'pi.approval' });
+      await runSessionDaemon(createPiRunner(runtime), { ...PI_BRANDING, configDir, cwd: runtime.cwd, runtime: 'Pi', approvalTool: 'pi.approval' });
       return;
     default: throw new Error('Unknown command: use status, pair, connect, or start');
   }

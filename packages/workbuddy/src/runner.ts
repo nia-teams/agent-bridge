@@ -1,10 +1,11 @@
 import { query, type Options } from '@tencent-ai/agent-sdk';
-import { consumeSdkQuery, createToolServer, ToolHttpServer, findExecutable, type TurnRunner } from '@nia-teams/agent-bridge-core';
+import { consumeSdkQuery, createToolServer, ToolHttpServer, findExecutable, RuntimeMissingResultError, type TurnRunner } from '@nia-teams/agent-bridge-core';
 import { homedir, platform } from 'node:os';
 import { execFile } from 'node:child_process';
 import { constants, existsSync } from 'node:fs';
 import { access, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 export interface WorkBuddyOptions { cwd: string; model?: string; fullAuto?: boolean; codebuddyBin?: string }
 const autoModels = new Set(['auto', 'auto-chat', 'fast-model', 'balanced-model', 'deep-model']);
 const genericModels = new Set(['default-model', 'primary-model']);
@@ -28,17 +29,25 @@ export async function resolveCodeBuddyBinary(explicit?: string): Promise<string>
     if (!(await stat(script)).isFile()) throw new Error(`CodeBuddy script is not a file: ${script}`);
     return script;
   }
+  const windows = platform() === 'win32';
+  const installRoots = windows
+    ? [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs')]
+        .filter((root): root is string => Boolean(root))
+    : [];
   const binary = await findExecutable('codebuddy', selected, [
     '/Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy',
     join(homedir(), 'Applications/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy'),
-    ...(process.env.LOCALAPPDATA ? [join(process.env.LOCALAPPDATA, 'Programs/WorkBuddy/resources/app.asar.unpacked/cli/bin/codebuddy.exe')] : []),
+    ...installRoots.flatMap(root => {
+      const cli = join(root, 'WorkBuddy', 'resources', 'app.asar.unpacked', 'cli');
+      return [join(cli, 'dist', 'codebuddy-lite-wb.mjs'), join(cli, 'bin', 'codebuddy')]; // Windows also probes .exe.
+    }),
     '/opt/homebrew/bin/codebuddy', '/usr/local/bin/codebuddy',
-  ]);
+  ], platform());
   if (/\.(?:cmd|bat)$/i.test(binary)) throw new Error('CodeBuddy SDK cannot run a custom batch wrapper; pass --codebuddy-bin with the underlying .js, .mjs, .cjs, or .exe entrypoint');
   // agent-sdk unconditionally rewrites bin/codebuddy to dist/codebuddy-headless.js.
   // Desktop WorkBuddy ships only this ESM bundle. Select its real entrypoint before
   // handing the path to the SDK, including when discovery followed a PATH symlink.
-  if (basename(binary) === 'codebuddy' && basename(dirname(binary)) === 'bin') {
+  if ((windows ? /^codebuddy(?:\.exe)?$/i : /^codebuddy$/).test(basename(binary)) && basename(dirname(binary)).toLowerCase() === 'bin') {
     const lite = join(dirname(binary), '../dist/codebuddy-lite-wb.mjs');
     try {
       if (!(await stat(lite)).isFile()) throw new Error(`CodeBuddy bundle is not a file: ${lite}`);
@@ -52,7 +61,8 @@ export async function resolveCodeBuddyBinary(explicit?: string): Promise<string>
 }
 async function workBuddyBundleEnvironment(binary: string): Promise<Options['env']> {
   const defaultConfigDir = join(homedir(), '.workbuddy');
-  if (!binary.includes('WorkBuddy.app') && !existsSync(defaultConfigDir)) return undefined;
+  const bundled = binary.includes('WorkBuddy.app') || /[\\/]WorkBuddy[\\/]resources[\\/]app\.asar\.unpacked[\\/]cli[\\/]/i.test(binary);
+  if (!bundled && !existsSync(defaultConfigDir)) return undefined;
   const configDir = process.env.CODEBUDDY_CONFIG_DIR || process.env.WORKBUDDY_CONFIG_DIR || defaultConfigDir;
   const env: NonNullable<Options['env']> = {
     CODEBUDDY_FORCE_LITE_WB_BUNDLE: '1',
@@ -121,7 +131,7 @@ function workBuddyElectron(binary: string): string {
     if (existsSync(electron)) return electron;
   }
   if (platform() === 'darwin') return '/Applications/WorkBuddy.app/Contents/MacOS/Electron';
-  // resources/app.asar.unpacked/cli/bin/codebuddy is inside the desktop install.
+  // Both cli/bin/codebuddy(.exe) and cli/dist/codebuddy-lite-wb.mjs are four directories below the install root.
   return join(dirname(binary), '../../../..', platform() === 'win32' ? 'WorkBuddy.exe' : 'workbuddy');
 }
 async function decryptDesktopToken(binary: string, authFilePath: string, signal: AbortSignal): Promise<string> {
@@ -193,6 +203,7 @@ export function createWorkBuddyRunner(options: WorkBuddyOptions): TurnRunner {
     if (context.signal.aborted) abort();
     const server = { type: 'sdk' as const, name: 'nia', instance: createToolServer({ ...context, tools: context.tools.filter(t => !t.deferLoading) }) };
     const deferred = new ToolHttpServer({ ...context, tools: context.tools.filter(t => t.deferLoading) });
+    let stderrTail = '';
     try {
       return await consumeSdkQuery(query({ prompt: context.prompt, options: {
         pathToCodebuddyCode: binary, env, cwd: options.cwd, model, resume: context.resume,
@@ -205,8 +216,26 @@ export function createWorkBuddyRunner(options: WorkBuddyOptions): TurnRunner {
           const result = await context.permission(name, input, detail.signal);
           return result.behavior === 'allow' ? { behavior: 'allow', updatedInput: result.updatedInput ?? input } : { behavior: 'deny', message: result.message ?? 'Denied' };
         },
-        stderr: data => process.stderr.write(data),
+        stderr: data => {
+          stderrTail = (stderrTail + data).slice(-4096);
+          process.stderr.write(data);
+        },
       } }), context);
+    } catch (error) {
+      if (!context.signal.aborted && /Invalid OIDC token/i.test(`${stderrTail}\n${error instanceof Error ? error.message : ''}`)) {
+        throw new Error('WorkBuddy desktop authentication expired or invalid (Invalid OIDC token). Open WorkBuddy desktop, sign in again, and retry.');
+      }
+      if (error instanceof RuntimeMissingResultError) {
+        // Do not copy the SDK's local auth token or terminal control sequences into chat.
+        const token = env?.CODEBUDDY_AUTH_TOKEN ?? process.env.CODEBUDDY_AUTH_TOKEN;
+        const output = token ? stderrTail.replaceAll(token, '[redacted]') : stderrTail;
+        const excerpt = stripVTControlCharacters(output)
+          .split(/\r?\n/).map(line => line.trim())
+          .filter(line => line && !/Git Bash (?:was )?not found|fall(?:s|ing) back to PowerShell/i.test(line))
+          .slice(-3).join(' | ').slice(-400);
+        if (excerpt) throw new RuntimeMissingResultError(error.usedTool, excerpt);
+      }
+      throw error;
     } finally { context.signal.removeEventListener('abort', abort); try { await server.instance.close(); } finally { await deferred.close(); } }
   };
 }

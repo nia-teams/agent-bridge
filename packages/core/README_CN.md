@@ -123,7 +123,8 @@ node node_modules/@nia-teams/agent-bridge-core/examples/connect.mjs
 | 导出 | 用途 |
 | --- | --- |
 | `SessionHost` | 群聊输入队列、会话恢复、取消、人工问答与确认卡 |
-| `runSessionDaemon` | 装配 BridgeClient 与 SessionHost，管理信号退出 |
+| `runSessionDaemon` | 装配 BridgeClient 与 SessionHost，记录 PID 并处理退出信号 |
+| `stopSessionDaemon` | 停止指定配置目录中登记的守护进程 |
 | `consumeSdkQuery` | 消费 SDK 事件并同步会话与状态，不发布文本 |
 | `ThreadMapStore` | 按群聊保存接入方运行时的会话标识 |
 | `IdleSleepGuard` | macOS 上任务执行期间通过 `caffeinate` 防止系统休眠 |

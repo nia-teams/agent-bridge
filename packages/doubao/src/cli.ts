@@ -32,8 +32,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (await maybeRespawnDaemon(args, resolve(configDir, 'daemon.log'))) return;
   if (values.platform && !['auto', 'work', 'doubao', 'cli', 'headless'].includes(values.platform)) throw new Error('--platform must be auto, work, doubao, cli, or headless');
   if (values.runtime && !['local', 'cloud'].includes(values.runtime)) throw new Error('--runtime must be local or cloud');
-  const runner = createDoubaoRunner({ cwd: resolve(values.cwd ?? process.cwd()), model: values.model, fullAuto: values['full-auto'],
+  const cwd = resolve(values.cwd ?? process.cwd());
+  const runner = createDoubaoRunner({ cwd, model: values.model, fullAuto: values['full-auto'],
     doubaoBin: values['doubao-bin'], platform: values.platform as DoubaoPlatform | undefined, runtime: values.runtime as 'local' | 'cloud' | undefined, restartApp: values['restart-app'] });
   await runner.ready();
-  await runSessionDaemon(runner, { ...clientBranding, configDir, runtime: 'Doubao', approvalTool: 'doubao.approval', fullAuto: values['full-auto'] });
+  await runSessionDaemon(runner, { ...clientBranding, configDir, cwd, runtime: 'Doubao', approvalTool: 'doubao.approval', fullAuto: values['full-auto'] });
 }

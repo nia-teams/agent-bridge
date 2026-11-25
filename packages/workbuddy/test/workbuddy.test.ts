@@ -31,7 +31,7 @@ test('WorkBuddy runner passes bundle and configuration overrides to SDK query', 
         setup(build) {
           const modules = {
             '@tencent-ai/agent-sdk': `export const query = input => input; export const tool = () => ({}); export const createSdkMcpServer = () => ({ instance: { close: async () => {} } });`,
-            '@nia-teams/agent-bridge-core': `export const findExecutable = async (_, explicit) => explicit; export const consumeSdkQuery = input => input; export const createToolServer = () => ({ close: async () => {} }); export class ToolHttpServer { async close() {} }; export const findTool = (tools, name) => tools.find(t => t.name === name);`,
+            '@nia-teams/agent-bridge-core': `export const findExecutable = async (_, explicit) => explicit; export const consumeSdkQuery = input => input; export class RuntimeMissingResultError extends Error {}; export const createToolServer = () => ({ close: async () => {} }); export class ToolHttpServer { async close() {} }; export const findTool = (tools, name) => tools.find(t => t.name === name);`,
             'node:os': `export const homedir = () => ${JSON.stringify(home)}; export const platform = () => ${JSON.stringify(platformName)};`,
           };
           build.onResolve({ filter: /^(@tencent-ai\/agent-sdk|@nia-teams\/agent-bridge-core|node:os)$/ }, args => ({ path: args.path, namespace: 'mock' }));
@@ -317,7 +317,16 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
   await chmod(binary, 0o755);
   const fixture = (await readFile(join(process.cwd(), '../../tests/fixtures/mock-sdk-cli.mjs'), 'utf8'))
     .replace("log({ kind: 'spawn', args });", `log({ kind: 'spawn', args, entry: process.argv[1], cwd: process.cwd(), env: Object.fromEntries(['PATH', 'HOME', 'CODEBUDDY_AUTH_TOKEN', 'CODEBUDDY_CONFIG_DIR', 'WORKBUDDY_CONFIG_DIR', 'ACC_PRODUCT_CONFIG_PATH', 'CODEBUDDY_FORCE_LITE_WB_BUNDLE', 'CODEBUDDY_FORCE_HEADLESS_BUNDLE'].map(key => [key, process.env[key]])) });`);
-  await writeFile(lite, fixture, { mode: 0o644 });
+  await writeFile(lite, fixture.replace('async function turn() {', `async function turn() {
+    if (prompt === 'invalid-auth') {
+      process.stderr.write('Invalid OIDC token\\n', () => process.exit(1));
+      return;
+    }
+    if (prompt === 'diagnostic') {
+      process.stderr.write('Discard this old line\\n' + 'x'.repeat(4200) + '\\nGit Bash not found, falling back to PowerShell\\r\\nMissing local session\\nCould not load project\\n', () => process.exit(1));
+      return;
+    }
+  `), { mode: 0o644 });
   const entries = async () => (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   const invoke = async (selected, extra = {}, overrides = {}) => {
     const sessions = [], sends = [], permissions = [];
@@ -351,6 +360,23 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
     assert.ok(turn.spawn.args.includes('user,project,local'));
     assert.deepEqual(turn.spawn.args.slice(turn.spawn.args.indexOf('--model'), turn.spawn.args.indexOf('--model') + 2), ['--model', 'glm-5.3']);
     assert.deepEqual((await readdir(join(cli, 'dist'))).sort(), ['codebuddy-lite-wb.mjs', 'lazy-lite-wb']);
+  });
+  await t.test('runtime EOF surfaces WorkBuddy login instructions and concise stderr', async () => {
+    const forwarded = [];
+    const mock = t.mock.method(process.stderr, 'write', data => { forwarded.push(data); return true; });
+    try {
+      await assert.rejects(invoke(lite, {}, { prompt: 'invalid-auth' }), {
+        message: 'WorkBuddy desktop authentication expired or invalid (Invalid OIDC token). Open WorkBuddy desktop, sign in again, and retry.',
+      });
+      await assert.rejects(invoke(lite, {}, { prompt: 'diagnostic' }), error => {
+        assert.match(error.message, /^Runtime stream ended without a result:/);
+        assert.match(error.message, /Missing local session \| Could not load project$/);
+        assert.doesNotMatch(error.message, /Git Bash|Discard this old line|Invalid OIDC token/);
+        assert.ok(error.message.length <= 442);
+        return true;
+      });
+      assert.match(forwarded.join(''), /Invalid OIDC token[\s\S]*Git Bash not found/);
+    } finally { mock.mock.restore(); }
   });
   await t.test('direct non-executable .mjs and CODEBUDDY_BIN use the same SDK entrypoint', async () => {
     assert.equal((await invoke(lite)).spawn.entry, lite);

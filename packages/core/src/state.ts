@@ -39,7 +39,7 @@ export class JsonFileStore<T> {
     this.writes = task.catch(() => {}); return task;
   }
 }
-export interface SessionMapping { sessionId: string; groupChatId: string; updatedAt: string }
+export interface SessionMapping { sessionId: string; groupChatId: string; updatedAt: string; cwd?: string }
 export class ThreadMapStore {
   private readonly file: JsonFileStore<Record<string, SessionMapping>>;
   private values: Record<string, SessionMapping> = Object.create(null);
@@ -47,7 +47,7 @@ export class ThreadMapStore {
     this.file = new JsonFileStore(configDir, 'threads.json', value => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid thread mappings');
       for (const entry of Object.values(value)) {
-        if (!entry || typeof entry !== 'object' || typeof entry.sessionId !== 'string' || !entry.sessionId || typeof entry.groupChatId !== 'string' || typeof entry.updatedAt !== 'string') throw new Error('Invalid thread mapping');
+        if (!entry || typeof entry !== 'object' || typeof entry.sessionId !== 'string' || !entry.sessionId || typeof entry.groupChatId !== 'string' || typeof entry.updatedAt !== 'string' || (entry.cwd !== undefined && (typeof entry.cwd !== 'string' || !entry.cwd))) throw new Error('Invalid thread mapping');
       }
       return Object.assign(Object.create(null), value);
     });
@@ -55,4 +55,5 @@ export class ThreadMapStore {
   async load(): Promise<void> { this.values = await this.file.load(Object.create(null)); }
   get(id: string): SessionMapping | undefined { return this.values[id]; }
   set(id: string, entry: SessionMapping): Promise<void> { this.values[id] = entry; return this.file.save(this.values); }
+  delete(id: string): Promise<void> { delete this.values[id]; return this.file.save(this.values); }
 }

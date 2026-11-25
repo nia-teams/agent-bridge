@@ -1,5 +1,7 @@
 import { ActivityLease } from './activity.js';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
+import { RuntimeMissingResultError } from './sdk-turn.js';
 import type { BridgeClient } from './bridge-client.js';
 import type { CardAction, ThreadMessage, ThreadCancel, ActivityState, BridgeToolDefinition } from './types.js';
 import { PublicationQueue } from './publications.js';
@@ -21,15 +23,21 @@ export interface TurnContext {
 }
 export type TurnResult = void;
 export type TurnRunner = (context: TurnContext) => Promise<TurnResult>;
-export interface SessionHostOptions { clientName?: string; avatar?: string; configDir: string; runtime: string; approvalTool: string; fullAuto?: boolean; approvalTimeoutMs?: number; activityRefreshMs?: number; onError?: (error: Error) => void; maxQueuedMessages?: number }
+export interface SessionHostOptions { clientName?: string; avatar?: string; configDir: string; cwd?: string; runtime: string; approvalTool: string; fullAuto?: boolean; approvalTimeoutMs?: number; activityRefreshMs?: number; onError?: (error: Error) => void; maxQueuedMessages?: number }
 interface Active { finishing?: boolean; controller: AbortController; id: string }
 interface Thread { frame: ThreadMessage; active?: Active; queue: ThreadMessage[]; worker?: Promise<void>; question?: { userId?: string; questions: Array<{ question: string }>; resolve(input: Record<string, unknown>): void } }
 interface PendingCard { thread: Thread; active: Active; args: Record<string, unknown>; resolve(value: boolean): void }
+
+function comparableCwd(cwd: string): string {
+  const absolute = resolve(cwd);
+  return process.platform === 'win32' ? absolute.toLowerCase() : absolute;
+}
 
 /** Shared turn lifecycle for runtimes whose query API runs one turn to completion. */
 export class SessionHost {
   private readonly lease: ActivityLease;
   private readonly store: ThreadMapStore;
+  private readonly cwd?: string;
   private readonly publications: PublicationQueue;
   private readonly threads = new Map<string, Thread>();
   private readonly cards = new Map<string, PendingCard>();
@@ -38,6 +46,7 @@ export class SessionHost {
   private closed = false;
   constructor(private readonly bridge: SessionBridge, private readonly runner: TurnRunner, private readonly options: SessionHostOptions) {
     this.lease = new ActivityLease(bridge, { intervalMs: options.activityRefreshMs, onError: error => this.report(error) });
+    this.cwd = options.cwd ? resolve(options.cwd) : undefined;
     this.store = new ThreadMapStore(options.configDir); this.publications = new PublicationQueue(bridge);
   }
   private report(error: unknown): void { try { this.options.onError?.(error instanceof Error ? error : new Error(String(error))); } catch {} }
@@ -93,6 +102,9 @@ export class SessionHost {
       try {
         const saved = this.store.get(frame.agentThreadId);
         if (saved && saved.groupChatId !== frame.groupChatId) throw new Error('Stored session belongs to another GroupChat');
+        const cwd = this.cwd;
+        const resume = saved?.cwd && cwd && comparableCwd(saved.cwd) !== comparableCwd(cwd) ? undefined : saved?.sessionId;
+        let usedTool = false;
         await this.activity(thread, frame, active, 'executing', `Thinking in ${this.options.runtime}…`);
         const contract = this.bridge.getContract();
         if (!contract) throw new Error('Bridge contract is missing');
@@ -100,6 +112,7 @@ export class SessionHost {
           signal.throwIfAborted();
           if (active.finishing || thread.active !== active) throw new Error('Turn is completing');
           if (!contract.tools.some(tool => tool.name === name)) throw new Error('Unknown collaboration tool');
+          usedTool = true;
           if (name === 'send_message') {
             if (typeof args.content !== 'string' || !args.content.trim()) throw new Error('Message must be nonempty');
             const revision = this.lease.record(frame.agentThreadId, frame.sessionId, { state: 'executing', label: `Thinking in ${this.options.runtime}…` }, signal);
@@ -109,14 +122,21 @@ export class SessionHost {
           const result = await this.bridge.rpc('tool.call', { sessionId: frame.sessionId, toolCallId, name, arguments: args }, signal);
           return { content: typeof result.content === 'string' ? result.content : JSON.stringify(result), ...(result.isError ? { isError: true } : {}) };
         };
-        await this.runner({ ...contract, deliveryId: frame.deliveryId, prompt: resolveThreadPrompt(frame), resume: saved?.sessionId, signal, turnId: active.id,
-          session: async id => { signal.throwIfAborted(); if (!id) throw new Error('Empty runtime session id'); await this.store.set(frame.agentThreadId, { sessionId: id, groupChatId: frame.groupChatId, updatedAt: new Date().toISOString() }); },
+        const context: TurnContext = { ...contract, deliveryId: frame.deliveryId, prompt: resolveThreadPrompt(frame), resume, signal, turnId: active.id,
+          session: async id => { signal.throwIfAborted(); if (!id) throw new Error('Empty runtime session id'); await this.store.set(frame.agentThreadId, { sessionId: id, groupChatId: frame.groupChatId, updatedAt: new Date().toISOString(), cwd }); },
           activity: (state, label) => this.activity(thread, frame, active, state, label),
           callTool,
           send: async (content, toolCallId) => { const result = await callTool('send_message', { content }, toolCallId); if (result.isError) throw new Error(result.content); },
           history: async (limit = 50, offset = 0) => callTool('chat_history', { limit, offset }),
-          permission: (tool, input, toolSignal) => this.permission(thread, frame, active, tool, input, toolSignal),
-        });
+          permission: (tool, input, toolSignal) => { usedTool = true; return this.permission(thread, frame, active, tool, input, toolSignal); },
+        };
+        try { await this.runner(context); }
+        catch (error) {
+          if (!resume || signal.aborted || usedTool || !RuntimeMissingResultError.canRetry(error)) throw error;
+          await this.store.delete(frame.agentThreadId);
+          signal.throwIfAborted();
+          await this.runner({ ...context, resume: undefined });
+        }
         signal.throwIfAborted();
         active.finishing = true;
         this.lease.clear(frame.agentThreadId);

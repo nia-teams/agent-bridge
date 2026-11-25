@@ -63,6 +63,21 @@ test('an explicit model overrides the environment, and the environment can suppl
   }
   assert.equal(f.requests.length, 0);
 });
+test('start --daemon rejects a missing binary before creating daemon files', async t => {
+  const f = await connectFixture(t);
+  const binary = join(f.dir, 'missing-codebuddy.exe');
+  await assert.rejects(cli(['start', '--daemon', '--config-dir', f.dir, '--codebuddy-bin', binary], 'glm-5.3'), {
+    code: 1, stdout: '', stderr: /Cannot find codebuddy.*missing-codebuddy\.exe/,
+  });
+  await assert.rejects(access(join(f.dir, 'daemon.log')), { code: 'ENOENT' });
+  await assert.rejects(access(join(f.dir, 'daemon.pid')), { code: 'ENOENT' });
+});
+
+test('stop is idempotent and does not require a model', async t => {
+  const f = await connectFixture(t);
+  assert.match((await cli(['stop', '--config-dir', f.dir])).stdout, /No WorkBuddy daemon is running/);
+});
+
 test('pair, status and help do not require a model', async t => {
   const f = await fixture(t);
   f.pendingPolls = 0;
@@ -72,4 +87,5 @@ test('pair, status and help do not require a model', async t => {
   const { stdout } = await cli(['--help']);
   assert.match(stdout, /^nia-workbuddy connect .*--model/m);
   assert.match(stdout, /^nia-workbuddy start .*--model/m);
+  assert.match(stdout, /^nia-workbuddy stop /m);
 });

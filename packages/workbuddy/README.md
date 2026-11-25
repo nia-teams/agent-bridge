@@ -113,7 +113,7 @@ GroupChats have separate model contexts but share the files, repository, and loc
 
 #### SDK sessions, tool requests, and questions
 
-Private `threads.json` stores each GroupChat’s CodeBuddy `session_id`; later queries pass it as `resume`. `SessionHost` serializes turns within a chat and queues incoming messages. Nia session rotation aborts the old query and clears old inputs. Each chat admits up to 64 queued messages by default; input admission and outgoing publication queues are separate.
+Private `threads.json` stores each GroupChat’s CodeBuddy session ID and workspace. Changing `--cwd` starts a fresh runtime session in that chat without changing its pairing. If a resumed query ends without a result before using any tools, the bridge tries once with a fresh session. Authentication failures require signing in again. `SessionHost` serializes turns within a chat and queues incoming messages. Nia session rotation aborts the old query and clears old inputs. Each chat admits up to 64 queued messages by default; input admission and outgoing publication queues are separate.
 
 SDK system, assistant, and result events drive session persistence and activity only. Terminal output stays on the host; GroupChat replies are published through `send_message`.
 
@@ -135,7 +135,7 @@ Watch the activity strip above the composer: red **Disconnected** changes to **I
 
 Type `@` in the composer and select the external Agent. Its activity becomes executing while the task runs, and replies appear in GroupChat. Incoming prompts include title, URL, members, sender, messages, and attachment transcripts. Notify a person with their ID: `<mention userId="24-hex-id" />`, rather than plain `@Name`.
 
-- **Temporary offline**: Press `Ctrl+C` in the foreground terminal or send SIGTERM to the recorded background PID. Presence becomes **Disconnected**. Restart loads existing credentials and session mappings.
+- **Temporary offline**: Press `Ctrl+C` in the foreground terminal or run `nia-workbuddy stop` for a background daemon (include the same `--config-dir` if set). Presence becomes **Disconnected**. Restart loads existing credentials and session mappings.
 - **Move or unpair a host**: An Agent `owner` / `admin` pairs the new host and selects **Rebind existing external Agent**. To unpair only, use **Apps → Agent Settings → Unpair host** in a shared chat’s upper-right header. Rebind/unpair increments `keyGeneration` to invalidate old host credentials and disconnects the old host with `4401`. A competing connection taking over the same identity closes the old connection with `4409`, stopping reconnects.
 - **Deactivate and archive**: When no other contacts remain and you are the sole `owner`, use **Agent Settings → Deactivate “Agent name” → Confirm**. Archiving revokes the Agent’s online connections.
 
@@ -144,7 +144,7 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 - **Startup reports a missing model or rejects a model alias**: Use CodeBuddy’s `/model` to find an available model and pass its concrete ID with `--model` or `CODEBUDDY_MODEL`. To pair without starting, use `nia-workbuddy connect --no-start`.
 - **Pairing request expired**: Links last 10 minutes. Run `nia-workbuddy pair` again on the host and open the new URL.
 - **status fails**: Check OS user, config directory, file permissions, and completed pairing. A locally operated re-pair may be needed after rebind/unpair; diagnose network and origin failures before replacing credentials.
-- **Chat stays red Disconnected**: Inspect the daemon, `/tmp/nia-workbuddy.log`, saved Server, and chat Agent identity. Check for another process using the credentials. Close code `4409` means another connection took over.
+- **Chat stays red Disconnected**: Inspect the daemon log (`daemon.log` in the config directory by default), saved Server, and chat Agent identity. Check for another process using the credentials. Close code `4409` means another connection took over.
 - **CodeBuddy login or startup fails**: Run the WorkBuddy desktop app or CodeBuddy CLI under the same OS user, sign in, and verify Node version and binary selection. CodeBuddy sign-in and Nia pairing are separate.
 - **Execution without a reply**: Check the daemon log for runtime or publication errors, and verify the turn was not canceled or interrupted by session rotation.
 
@@ -154,18 +154,19 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 nia-workbuddy connect [--cwd <dir>] [--model <model-id>] [--no-start] [--group-link <url-or-token>]
 nia-workbuddy pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-workbuddy status [--config-dir <dir>]
+nia-workbuddy stop [--config-dir <dir>]
 nia-workbuddy start [--cwd <dir>] [--config-dir <dir>] [--model <model-id>]
                    [--full-auto] [--codebuddy-bin <path>]
 nia-workbuddy --help
 ```
 
 - `--server-url`: Pairing origin; precedence is flag, `NIA_TEAMS_URL`, then `https://nia-teams.com`. Later commands use the saved origin.
-- `--config-dir`: Explicit path overrides `NIA_WORKBUDDY_CONFIG_DIR` and defaults to `~/.config/nia-teams-workbuddy`. Use the same directory for pair, status, and start.
+- `--config-dir`: Explicit path overrides `NIA_WORKBUDDY_CONFIG_DIR` and defaults to `~/.config/nia-teams-workbuddy`. Use the same directory for pair, status, start, and stop.
 - `--name`: Pairing host label shown in browser and handshake; omission generates a host-prefixed machine label. The Agent display name can be changed in the browser.
 - `--cwd`: Project working directory; defaults to the current directory and resolves to an absolute path. It does not move credentials.
-- `--model` / `CODEBUDDY_MODEL`: Starting the daemon, including via `connect`, requires a concrete model ID available to your account. `--model` takes precedence over `CODEBUDDY_MODEL`; surrounding whitespace is trimmed. Auto routing (`auto`, `auto-chat`, `fast-model`, `balanced-model`, `deep-model`) can lead to repeated MCP tool calls in long conversations. The bridge rejects those IDs as well as the generic aliases `default-model` and `primary-model`. `connect --no-start`, `pair`, and `status` do not require a model.
+- `--model` / `CODEBUDDY_MODEL`: Starting the daemon, including via `connect`, requires a concrete model ID available to your account. `--model` takes precedence over `CODEBUDDY_MODEL`; surrounding whitespace is trimmed. Auto routing (`auto`, `auto-chat`, `fast-model`, `balanced-model`, `deep-model`) can lead to repeated MCP tool calls in long conversations. The bridge rejects those IDs as well as the generic aliases `default-model` and `primary-model`. `connect --no-start`, `pair`, `status`, and `stop` do not require a model.
 - `--help` / `-h`: Show command overview; no command also displays help.
-- `--codebuddy-bin / CODEBUDDY_BIN`: Select a CodeBuddy executable or readable `.mjs` / `.js` entry.
+- `--codebuddy-bin / CODEBUDDY_BIN`: Select a CodeBuddy executable or readable `.mjs` / `.js` entry. On Windows, standard WorkBuddy installations under Program Files and Local AppData are detected automatically.
 - `--full-auto`: Disable bridge tool confirmations.
 
 ### Exports and embedding

@@ -114,7 +114,7 @@ pgrep -af '[n]ia-workbuddy.*start'
 
 #### SDK 会话、工具请求与提问
 
-每个群聊在私有 `threads.json` 中保存 CodeBuddy 的 `session_id`，后续查询通过 `resume` 恢复。`SessionHost` 为同一群聊串行执行轮次，运行中到达的消息排队；群聊会话切换时中止旧查询并清理旧输入。每个群聊默认最多排队 64 条消息，输入队列与待发回复队列分别管理。
+私有 `threads.json` 保存每个群聊的 CodeBuddy 会话标识及工作目录。更换 `--cwd` 后，该群聊会开启新的运行时会话，配对不变。若恢复的会话未调用工具就结束且没有结果，桥接会新建会话重试一次；认证失败时需要重新登录。`SessionHost` 为同一群聊串行执行轮次，运行中到达的消息排队；群聊会话切换时中止旧查询并清理旧输入。每个群聊默认最多排队 64 条消息，输入队列与待发回复队列分别管理。
 
 SDK 的 system、assistant 与 result 事件仅用于保存会话和同步活动状态。终端输出留在本机，群聊回复通过 `send_message` 发布。
 
@@ -135,7 +135,7 @@ SDK 的 system、assistant 与 result 事件仅用于保存会话和同步活动
 
 在输入框输入 `@` 选中该外部 Agent 并发送任务。执行时状态栏显示 `Thinking…` 或正在运行的工具，回复发回群聊。后续日常管理按权限分为三类：
 
-- **临时离线（主机侧操作）**：以前台方式运行时，在主机终端按 `Ctrl+C` 停止 `nia-workbuddy start`；后台运行时，对启动时记录的 PID 发送 SIGTERM。群内状态会变为 `未连接`，重新运行 `nia-workbuddy start --cwd /path/to/workspace --model "<model-id>"` 即可恢复连接。
+- **临时离线（主机侧操作）**：以前台方式运行时，在主机终端按 `Ctrl+C` 停止 `nia-workbuddy start`；后台运行时，执行 `nia-workbuddy stop`；若启动时指定了 `--config-dir`，停止时使用同一目录。群内状态会变为 `未连接`，重新运行 `nia-workbuddy start --cwd /path/to/workspace --model "<model-id>"` 即可恢复连接。
 - **更换主机或解绑主机（需该 Agent 的 `owner` 或 `admin`）**：迁移到新主机时，在新主机执行 `nia-workbuddy pair`，在浏览器配对页切换到 **重绑已有外部 Agent**，选中目标后点击 **确认重新绑定**。若仅需解绑，在它的对话页或共同所在的群聊右上角打开应用菜单（网格图标 **Apps**）→ **Agent 设置**，点击 **解绑主机**。重绑或解绑会递增 `keyGeneration` 使旧主机凭证失效，并以关闭码 `4401` 断开旧连接。
 - **停用归档（仅唯一 `owner` 可操作）**：当该外部 Agent 没有其他联系人且你是唯一 `owner` 时，在 **Agent 设置** 底部点击 **停用「&lt;Agent 名称&gt;」**，再点 **确认停用**，即可归档移除并断开在线连接。
 
@@ -144,7 +144,7 @@ SDK 的 system、assistant 与 result 事件仅用于保存会话和同步活动
 - **启动提示缺少模型或拒绝模型别名**：用 CodeBuddy 的 `/model` 查看账号可用的模型，通过 `--model` 或 `CODEBUDDY_MODEL` 选择具体的模型 ID。仅配对可用 `nia-workbuddy connect --no-start`。
 - **网页提示「配对请求已过期」**：配对链接有效期为 10 分钟，回到主机终端重新执行 `nia-workbuddy pair`，再打开新链接。
 - **`nia-workbuddy status` 报错或绑定不是目标 Agent**：核对当前系统用户、配置目录和服务地址。若尚未完成配对，或旧主机凭证因重绑、解绑而失效，重新执行 `nia-workbuddy pair` 并启动桥接进程。`status` 只显示保存的身份，不代表主机已在线。
-- **群里一直显示红色 `未连接`**：确认 `nia-workbuddy start` 进程仍在运行，检查 `/tmp/nia-workbuddy.log` 中的启动或连接错误，并用 `nia-workbuddy status` 核对群内 Agent 与保存的身份是否一致。若日志出现 `4409`，说明另一个连接接管了同一身份，应检查是否重复启动了进程。
+- **群里一直显示红色 `未连接`**：确认 `nia-workbuddy start` 进程仍在运行，检查守护进程日志（默认是配置目录中的 `daemon.log`）中的启动或连接错误，并用 `nia-workbuddy status` 核对群内 Agent 与保存的身份是否一致。若日志出现 `4409`，说明另一个连接接管了同一身份，应检查是否重复启动了进程。
 - **WorkBuddy / CodeBuddy 未登录或启动失败**：先在同一系统用户下运行 WorkBuddy 桌面端或 CodeBuddy CLI，完成登录，确认 Node.js 版本和可执行文件路径。模型产品的登录与 Nia Teams 配对是两件事，不能互相替代。
 - **任务已执行但没有回复**：检查守护进程日志中的运行或消息发布错误，确认任务未被取消，也未因群聊会话切换而中断。
 
@@ -154,18 +154,19 @@ SDK 的 system、assistant 与 result 事件仅用于保存会话和同步活动
 nia-workbuddy connect [--cwd <dir>] [--model <model-id>] [--no-start] [--group-link <url-or-token>]
 nia-workbuddy pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-workbuddy status [--config-dir <dir>]
+nia-workbuddy stop [--config-dir <dir>]
 nia-workbuddy start [--cwd <dir>] [--config-dir <dir>] [--model <model-id>]
                    [--full-auto] [--codebuddy-bin <path>]
 nia-workbuddy --help
 ```
 
 - `--server-url`：配对服务 origin，优先级为参数、`NIA_TEAMS_URL`、`https://nia-teams.com`；后续命令读取保存的地址。
-- `--config-dir`：参数优先于 `NIA_WORKBUDDY_CONFIG_DIR`，默认 `~/.config/nia-teams-workbuddy`；pair、status、start 应指向同一目录。
+- `--config-dir`：参数优先于 `NIA_WORKBUDDY_CONFIG_DIR`，默认 `~/.config/nia-teams-workbuddy`；pair、status、start、stop 应指向同一目录。
 - `--name`：配对主机标签，显示在浏览器和握手中；未传入时按宿主前缀与主机名生成。浏览器可另行填写 Agent 显示名。
 - `--cwd`：项目工作目录，默认当前目录，启动时转为绝对路径；它不改变配对凭证位置。
-- `--model` / `CODEBUDDY_MODEL`：运行 `start` 或会自动启动守护进程的 `connect` 时，必须指定账号可用的具体模型 ID。`--model` 优先于环境变量 `CODEBUDDY_MODEL`；未传 `--model` 时使用环境变量。选定的值会去除首尾空白。Auto 路由（`auto`、`auto-chat`、`fast-model`、`balanced-model`、`deep-model`）可能导致长对话中的 MCP 工具调用反复执行。桥接程序不接受这些 ID，也不接受通用别名 `default-model` 和 `primary-model`。`pair`、`status` 和 `connect --no-start` 无需指定模型。
+- `--model` / `CODEBUDDY_MODEL`：运行 `start` 或会自动启动守护进程的 `connect` 时，必须指定账号可用的具体模型 ID。`--model` 优先于环境变量 `CODEBUDDY_MODEL`；未传 `--model` 时使用环境变量。选定的值会去除首尾空白。Auto 路由（`auto`、`auto-chat`、`fast-model`、`balanced-model`、`deep-model`）可能导致长对话中的 MCP 工具调用反复执行。桥接程序不接受这些 ID，也不接受通用别名 `default-model` 和 `primary-model`。`pair`、`status`、`stop` 和 `connect --no-start` 无需指定模型。
 - `--help` / `-h`：显示命令概览；无命令时也显示帮助。
-- `--codebuddy-bin / CODEBUDDY_BIN`：指定 CodeBuddy 可执行文件或可读的 `.mjs` / `.js` 入口。
+- `--codebuddy-bin / CODEBUDDY_BIN`：指定 CodeBuddy 可执行文件或可读的 `.mjs` / `.js` 入口。Windows 上会自动查找 Program Files 和 Local AppData 中按默认路径安装的 WorkBuddy。
 - `--full-auto`：关闭桥接工具确认。
 
 ### 包导出与嵌入入口

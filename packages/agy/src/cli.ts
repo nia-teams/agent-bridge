@@ -35,8 +35,9 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
   if (positionals[0] !== 'start') throw new Error('Unknown command: use pair, status, or start');
   if (await maybeRespawnDaemon(args, resolve(configDir, 'daemon.log'))) return;
+  const cwd = resolve(values.cwd ?? process.cwd());
   const fullAuto = values['full-auto'] || values['bypass-approvals'];
-  const runner = createAgyRunner({ cwd: resolve(values.cwd ?? process.cwd()), agyBin: values['agy-bin'], model: values.model, mode: values.mode as AgyMode | undefined, sandbox: values.sandbox, fullAuto });
-  try { await resolveAgyBinary(values['agy-bin']); await runSessionDaemon(runner, { ...clientBranding, configDir, runtime: 'Antigravity', approvalTool: 'agy.approval', fullAuto }); }
+  const runner = createAgyRunner({ cwd, agyBin: values['agy-bin'], model: values.model, mode: values.mode as AgyMode | undefined, sandbox: values.sandbox, fullAuto });
+  try { await resolveAgyBinary(values['agy-bin']); await runSessionDaemon(runner, { ...clientBranding, configDir, cwd, runtime: 'Antigravity', approvalTool: 'agy.approval', fullAuto }); }
   finally { await runner.close(); }
 }
