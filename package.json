@@ -18,7 +18,7 @@
     "typescript": "^5.9.3",
     "@types/node": "^20.19.0",
     "@types/ws": "^8.18.0",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.28.2"
   },
   "license": "MIT",
   "author": "Nia Teams",
