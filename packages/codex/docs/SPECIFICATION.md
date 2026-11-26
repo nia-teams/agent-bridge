@@ -41,6 +41,8 @@ Every advertised tool is callable by name through `tool.call`. Returned `content
 
 ## Approvals
 
+Omitted `fullAuto` sets `approvalPolicy: never` and defaults the sandbox to `workspace-write`. `--require-approval` sets `fullAuto: false`, selecting `on-request` and defaulting the sandbox to `read-only`. An explicit sandbox overrides either default.
+
 - v2 `item/commandExecution/requestApproval` includes `kind`, `threadId`, `turnId`, `itemId`, `startedAtMs`, `environmentId`, optional command/cwd/reason/approvalId/availableDecisions.
 - v2 `item/fileChange/requestApproval` includes `threadId`, `turnId`, `itemId`, `startedAtMs`, optional reason/grantRoot. **It does not carry the patch.** The adapter obtains file changes/preview from preceding item lifecycle notifications when available, and shows the request otherwise.
 - v2 responses are `{ decision: "accept" | "decline" | "cancel" | ... }`.

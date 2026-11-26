@@ -70,14 +70,14 @@ test('logout/login target before next turn prevents submitting any task and is n
   await assert.rejects(runner({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'hi', signal: new AbortController().signal, session: async () => {} }), /Sign in inside DoubaoWork.app/);
   assert.equal((await calls()).some(c => c.args.includes('create')), false);
 });
-test('full-auto consent is programmatic per invocation; default never receives FullAccess', async t => {
+test('default FullAccess consent is scoped per invocation; opting out selects AskOnRisk', async t => {
   const { dir, calls } = await setup(t);
   const create = await loadRunner('darwin'); const context = { systemPrompt: 'Server policy', send: async () => {}, prompt: 'hi', signal: new AbortController().signal, session: async () => {} };
   await create({ cwd: dir, platform: 'work' })(context);
-  await create({ cwd: dir, platform: 'work', fullAuto: true })(context);
+  await create({ cwd: dir, platform: 'work', fullAuto: false })(context);
   const tasks = (await calls()).filter(c => c.args.includes('create'));
-  assert.equal(tasks[0].fullAccess, false); assert.ok(tasks[0].args.includes('AskOnRisk'));
-  assert.equal(tasks[1].fullAccess, true); assert.ok(tasks[1].args.includes('FullAccess'));
+  assert.equal(tasks[0].fullAccess, true); assert.ok(tasks[0].args.includes('FullAccess'));
+  assert.equal(tasks[1].fullAccess, false); assert.ok(tasks[1].args.includes('AskOnRisk'));
 });
 test('REAL portable local executor: AskOnRisk reads files but denies Bash; FullAccess runs commands without terminal approval', async t => {
   const { dir } = await setup(t);

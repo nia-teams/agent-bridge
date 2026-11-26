@@ -16,11 +16,11 @@ AI 编程助手请加载 [skills/nia-teams-droid/SKILL.md](./skills/nia-teams-dr
 
 ## 一、产品背景与协作模型
 
-本包通过 Factory 原生 TypeScript SDK 执行任务，支持已有的 `droid` CLI 登录或 `FACTORY_API_KEY`。群聊各自保存会话，团队成员通过 TaskBar 确认工具请求。
+本包通过 Factory 原生 TypeScript SDK 执行任务，支持已有的 `droid` CLI 登录或 `FACTORY_API_KEY`。群聊各自保存会话。
 
 - **创建并绑定，无需预先建 Agent**：在主机终端运行配对命令，在任意设备的浏览器打开生成的链接并登录 Nia Teams，即可新建外部 Agent 并绑定主机公钥。
 - **群聊实时状态与多轮会话隔离**：群聊底部显示该外部 Agent 的在线状态（`未连接`、`空闲待命`、`Thinking…`、`等待确认`）。每个群聊使用独立的 Droid 会话，后续任务沿用该群聊上下文；各群聊共享主机上的代码目录。
-- **TaskBar 权限确认与提问交互**：当 Factory Droid 请求执行命令、修改文件等操作的权限时，群聊底部 TaskBar 会弹出权限确认卡。该 Agent 的成员可点击 **允许执行**；普通提问在群消息中等待回复。
+- **群聊提问**：Agent 可在群聊中提问并等待任务发起人回复。
 
 ![Nia Teams 群聊与 Agent 活动状态](./docs/assets/group-chat-overview.png)
 
@@ -29,7 +29,7 @@ AI 编程助手请加载 [skills/nia-teams-droid/SKILL.md](./skills/nia-teams-dr
 | Agent 运行时 | 模型、工具、工作目录与 Droid 登录 | 群聊到运行时会话映射、查询与取消 | 外部 Agent 身份与归属 |
 | 连接与认证 | 本机 Node.js 进程与 Factory Droid CLI | Ed25519 凭证、WebSocket 长连接与重连 | 浏览器配对、challenge/lease 与消息投递 |
 | 群聊对话 | 推理轮次与本地任务 | 提示格式、会话恢复与回复发布 | 群聊时间线、成员与活动状态 |
-| 人工确认与安全边界 | Droid 工具权限与执行范围 | 将工具权限请求显示为 TaskBar 确认卡、RS256 验签与请求匹配 | TaskBar 卡片、Agent 成员权限与签名 |
+| 人工确认与安全边界 | Droid 工具权限与执行范围 | 默认免确认；可选 TaskBar 签名确认卡 | TaskBar 卡片、Agent 成员权限与签名 |
 
 ## 二、五步快速接入（从零到在群里对话）
 
@@ -110,7 +110,7 @@ pgrep -af '[n]ia-droid.*start'
 
 本包使用原生 `@factory/droid-sdk`，每轮启动进程并恢复对应群聊的本地会话。会话文件缺失时，在发送提示前创建新会话；发送失败的提示不重放。仅 `send_message` 发布群聊回复，助手文本留在主机上。
 
-Droid 权限请求显示为签名 TaskBar 卡片；AskUser 提问在群聊等待任务发起人回答。Droid 自主级别决定哪些操作触发权限请求；未指定时保留 Droid 默认值（测试的 CLI 为 medium）。`--autonomy off` 选择最低自主级别。`--full-auto` 设置 high，在本机批准 Droid 运行时权限请求，不发送 TaskBar 确认卡，也不跳过 AskUser 提问。本机 Droid 策略仍生效。
+免确认模式在未指定自主级别时使用 `high`；显式 `--autonomy` 优先。本机 Droid 策略仍生效，AskUser 提问仍在群聊等待任务发起人回答。
 
 ### 第 4 步：把外部 Agent 拉进群聊并验证在线状态
 
@@ -141,11 +141,11 @@ Droid 权限请求显示为签名 TaskBar 卡片；AskUser 提问在群聊等待
 
 ```text
 nia-droid connect [--group-link <url-or-token>] [--agent-name <name>]
-                  [--no-browser] [--no-start] [start options]
+                  [--no-browser] [--no-start] [--require-approval] [start options]
 nia-droid pair [--name <label>] [--server-url <url>] [--config-dir <dir>]
 nia-droid status [--config-dir <dir>]
 nia-droid start [--cwd <dir>] [--model <model>] [--effort <level>]
-                [--autonomy <off|low|medium|high>] [--full-auto]
+                [--autonomy <off|low|medium|high>] [--require-approval]
                 [--droid-bin <path>] [--daemon] [--log-file <path>]
                 [--config-dir <dir>]
 ```
@@ -157,20 +157,29 @@ nia-droid start [--cwd <dir>] [--model <model>] [--effort <level>]
 - `--name`：本地主机标签；`--cwd`：共享项目目录。
 - `--daemon`：后台启动；默认日志为 `<config-dir>/daemon.log`，`--log-file` 可覆盖。
 - `--help` / `-h`：命令概览。
+- `--require-approval`：在群聊 TaskBar 中确认运行时发来的工具权限请求。
+
+兼容旧命令的 `--full-auto` 与默认行为相同，不能与 `--require-approval` 同用。
 
 根模块导出 `createDroidRunner(options: DroidOptions): TurnRunner`、`resolveDroidBinary(explicit?: string): Promise<string>`、`validateDroidOptions(options: DroidOptions): void` 与 core 的 `SessionHost`。`DroidOptions` 包含 `cwd` 和可选的 `model`、`effort`、`autonomy`、`fullAuto`、`droidBin`。类型签名见 `dist/**/*.d.ts`；公开子路径为 `.`。嵌入时将运行器交给 core 的 `runSessionDaemon`，或由应用构造 `SessionHost` 管理生命周期。
 
 ## 四、群聊工具与安全边界
 
+### 可选的 TaskBar 签名确认
+
+日常编程会触发多次工具调用，默认免确认可避免群聊出现过多确认卡。需要逐项确认时，在 `connect` 或 `start` 加上 `--require-approval`。
+
 ![TaskBar 工具权限确认](./docs/assets/taskbar-approval.png)
+
+core 校验 TaskBar 的 RS256 签名及对应卡片、工具与参数，聊天中的批准文字不能授权操作。Factory 登录与 Nia Teams 配对相互独立。凭证保存在私有配置目录中；各群聊会话共享工作目录，不提供 OS 隔离。
+
+### 群聊工具与提问
 
 Nia Teams 提供可用的协作工具，包括群聊管理、提醒和分享链接，运行时通过本机工具接口加载。
 
 `send_message({ content })` 向当前群聊发布回复，`chat_history({ limit?, offset? })` 读取历史。工具参数与默认值由 Nia Teams 提供，协作工具限于当前轮次，权限由 Nia Teams 管理。
 
 AskUser 在群聊发布问题文本与选项标签。单题可回复选项标签或自定义文本；多题使用问题原文为键的 JSON，例如 `{"Choose a color":"Blue","Describe the task":"Review the patch"}`。选项标签仅供参考，不限制回答内容。桥接将每项回答作为字符串，连同原问题索引与文本返回：`{ answers: [{ index, question, answer }] }`。取消或拒绝提问返回 `{ cancelled: true, answers: [] }`。
-
-core 校验 TaskBar 的 RS256 签名及对应卡片、工具与参数，聊天中的批准文字不能授权操作。Factory 登录与 Nia Teams 配对相互独立。凭证保存在私有配置目录中；各群聊会话共享工作目录，不提供 OS 隔离。
 
 原生提及使用收到的发送者或成员 ID：`<mention userId="<userId>" />`。格式化消息带有发送者 ID；原始帧为 `messages[].authorId`，结构化频道可能使用 `senderId`。
 

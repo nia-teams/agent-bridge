@@ -66,7 +66,7 @@ test('dynamic tool request results use contentItems/inputText; history is sessio
 for (const method of ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval', 'execCommandApproval', 'applyPatchApproval']) {
   for (const outcome of ['valid', 'tampered', 'canceled']) {
     test(`${method}: ${outcome} RS256 confirmation → correct decision`, async t => {
-      const { f, log, emit, active } = await setup(t);
+      const { f, log, emit, active } = await setup(t, { fullAuto: false });
       const ids = await active();
       const legacy = !method.startsWith('item/');
       const params = legacy ? { conversationId: ids.threadId, callId: 'item-1', command: ['ls', '-la'], fileChanges: { '/example.txt': { type: 'add', content: 'hello' } }, cwd: f.dir } : { ...ids, itemId: 'item-1', startedAtMs: Date.now(), kind: 'command', environmentId: null, command: 'ls -la', cwd: f.dir };
@@ -84,7 +84,7 @@ for (const method of ['item/commandExecution/requestApproval', 'item/fileChange/
 }
 
 test('thread.cancel interrupts active turn and declines/cancels pending card', async t => {
-  const { f, host, log, emit, active } = await setup(t);
+  const { f, host, log, emit, active } = await setup(t, { fullAuto: false });
   const ids = await active();
   await emit({ id: 'pending', method: 'item/fileChange/requestApproval', params: { ...ids, itemId: 'file' } });
   await until(() => f.rpcs.some(r => r.method === 'card.upsert'));
@@ -129,22 +129,31 @@ test('independent GroupChat threads, session rotation interrupts old turn, delta
   await until(() => f.rpcs.some(r => r.method === 'thread.activity' && r.params.errorMessage === 'Model failed'));
 });
 
-test('approval timeout declines; full-auto explicitly configures never and workspace-write', async t => {
-  const { f, log, emit, active } = await setup(t, { approvalTimeoutMs: 40 });
+test('opt-in approval uses read-only and on-request; timeout declines', async t => {
+  const { f, log, emit, active } = await setup(t, { fullAuto: false, approvalTimeoutMs: 40 });
   const ids = await active();
+  const start = (await log()).find(m => m.method === 'thread/start');
+  assert.equal(start.params.approvalPolicy, 'on-request'); assert.equal(start.params.sandbox, 'read-only');
   await emit({ id: 'timeout', method: 'item/commandExecution/requestApproval', params: { ...ids, itemId: 'c', command: 'pwd' } });
   assert.equal((await waitResponse(log, 'timeout')).result.decision, 'decline');
   assert.ok(f.rpcs.some(r => r.method === 'card.cancel'));
 });
 
-test('full-auto bypass is explicit and sends accept without creating cards', async t => {
-  const { f, log, emit, active } = await setup(t, { fullAuto: true });
+test('default full-auto and sends accept without creating cards', async t => {
+  const { f, log, emit, active } = await setup(t);
   const ids = await active();
   const start = (await log()).find(m => m.method === 'thread/start');
   assert.equal(start.params.approvalPolicy, 'never'); assert.equal(start.params.sandbox, 'workspace-write');
   await emit({ id: 'auto', method: 'item/commandExecution/requestApproval', params: { ...ids } });
   assert.equal((await waitResponse(log, 'auto')).result.decision, 'accept');
   assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
+});
+
+test('explicit sandbox overrides the full-auto default', async t => {
+  const { log, active } = await setup(t, { sandbox: 'read-only' });
+  await active();
+  const { params } = (await log()).find(m => m.method === 'thread/start');
+  assert.equal(params.approvalPolicy, 'never'); assert.equal(params.sandbox, 'read-only');
 });
 
 test('persisted GroupChat mapping resumes after host restart rather than starting another thread', async t => {
@@ -178,7 +187,7 @@ test('cancellation interrupts a turn blocked on final idle without stalling the 
 });
 
 test('file approval preview comes from item lifecycle, and unknown server requests fail closed', async t => {
-  const { f, log, emit, active } = await setup(t);
+  const { f, log, emit, active } = await setup(t, { fullAuto: false });
   const ids = await active();
   await emit({ method: 'item/started', params: { ...ids, item: { id: 'patch', type: 'fileChange', changes: [{ path: '/example.txt', diff: '+new content' }] } } });
   await emit({ id: 'patch-approval', method: 'item/fileChange/requestApproval', params: { ...ids, itemId: 'patch', startedAtMs: Date.now() } });
@@ -256,7 +265,7 @@ for (const provider of ['openai', 'deepseek']) test(`provider ${provider}: defer
 });
 
 for (const outcome of ['complete', 'cancel']) test(`Codex executing/waiting leases renew and reconnect, then stop on ${outcome}`, async t => {
-  const { f, host, emit, active } = await setup(t, { activityRefreshMs: 40 });
+  const { f, host, emit, active } = await setup(t, { fullAuto: false, activityRefreshMs: 40 });
   const ids = await active();
   const activities = state => f.rpcs.filter(r => r.method === 'thread.activity' && r.params.state === state);
   await until(() => activities('executing').length >= 3);

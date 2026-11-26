@@ -16,11 +16,11 @@ For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat co
 
 ## 1. Product Overview & Collaboration Model
 
-The package runs tasks through the Claude Agent SDK using local Claude Code CLI authentication. Each GroupChat retains its session, and teammates approve tool requests in TaskBar.
+The package runs tasks through the Claude Agent SDK using local Claude Code CLI authentication. Each GroupChat retains its session.
 
 - **Create and bind in one flow, without precreating an Agent or distributing static keys**: Start pairing on the Claude Code host, sign in to Nia Teams from a browser on any device, create the external Agent, and bind the host public key. The private key stays on the host.
 - **Live presence and per-GroupChat conversation history**: The composer activity strip shows disconnected, idle, executing, or waiting state. Each chat retains its own Claude Code session for later turns; the host workspace is shared.
-- **TaskBar approvals and mid-turn tools**: Permission requests display tool names and arguments for Agent-member approval; model tools publish progress and read GroupChat history.
+- **Follow-up questions**: The Agent can ask the person who started the task for input in GroupChat.
 
 ![Nia Teams GroupChat and Agent activity](./docs/assets/group-chat-overview.png)
 
@@ -29,7 +29,7 @@ The package runs tasks through the Claude Agent SDK using local Claude Code CLI 
 | Agent runtime | Models, tools, workspace, Claude Code sign-in | Chat-to-runtime sessions, queries, cancellation | External Agent identity and scope |
 | Connection and auth | Local Node process and Claude Code CLI | Ed25519 credentials, WebSocket, reconnection | Browser pairing, challenge/lease, delivery |
 | Conversation | Inference turns and local tasks | Prompt formatting, session resume, publication | Timeline, members, activity |
-| Approval and safety | Claude Code tool permissions and execution scope | Display tool permission requests as TaskBar cards, verify RS256, match pending actions | TaskBar, Agent membership, signed approvals |
+| Approval and safety | Claude Code tool permissions and execution scope | Full-auto by default; signed TaskBar cards in opt-in mode | TaskBar, Agent membership, signed approvals |
 
 ## 2. Five-Step Quick Start
 
@@ -111,9 +111,9 @@ Private `threads.json` stores each GroupChat’s Claude Code `session_id`; later
 
 SDK system, assistant, and result events drive session persistence and activity only. Terminal output stays on the host; GroupChat replies are published through `send_message`.
 
-Tool requests delivered to `canUseTool` become TaskBar cards. `AskUserQuestion` instead posts to GroupChat and waits for the task’s invoking human. Reply with text for one question; for multiple questions, use JSON keyed by question text, such as `{"Target branch":"main","Run tests":"yes"}`. Timeout or cancellation returns a deny result to the Claude Agent SDK.
+`AskUserQuestion` posts to GroupChat and waits for the task’s invoking human. Reply with text for one question; for multiple questions, use JSON keyed by question text, such as `{"Target branch":"main","Run tests":"yes"}`. Timeout or cancellation returns a deny result to the Claude Agent SDK.
 
-Claude Code allow rules and hooks from user, project, and local settings remain effective. `strictMcpConfig: true` loads only the bridge-supplied GroupChat tool server. Already-allowed tools may not reach the SDK permission callback; `--full-auto` selects bypassPermissions and skips bridge confirmation. Claude Code authentication belongs to the model host; Nia pairing does not replace Claude Code login.
+Claude Code allow rules and hooks from user, project, and local settings remain effective. `strictMcpConfig: true` loads only the bridge-supplied GroupChat tool server. Full-auto selects `bypassPermissions`; `--require-approval` selects `default`. Already-allowed tools may not reach the SDK permission callback. Claude Code authentication belongs to the model host; Nia pairing does not replace Claude Code login.
 
 ### Step 4: Invite the external Agent and verify presence
 
@@ -145,11 +145,11 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 
 ```text
 nia-claude connect [--group-link <url-or-token>] [--agent-name <name>]
-                   [--no-browser] [--no-start] [--cwd <dir>] [--daemon] [--log-file <path>]
+                   [--no-browser] [--no-start] [--require-approval] [--cwd <dir>] [--daemon] [--log-file <path>]
 nia-claude pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-claude status [--config-dir <dir>]
 nia-claude start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
-                   [--full-auto] [--claude-bin <path>] [--daemon] [--log-file <path>]
+                   [--require-approval] [--claude-bin <path>] [--daemon] [--log-file <path>]
 nia-claude --help
 ```
 
@@ -162,7 +162,9 @@ nia-claude --help
 - `--model`: Model name passed to the selected Claude Code runtime; available models depend on the Claude Code account and settings.
 - `--help` / `-h`: Show command overview; no command also displays help.
 - `--claude-bin / CLAUDE_BIN`: Select a Claude Code executable or `.js` / `.mjs` / `.cjs` entry.
-- `--full-auto`: Disable bridge tool confirmations.
+- `--require-approval`: Review tool permission requests from the runtime in TaskBar.
+
+For compatibility, `--full-auto` matches the default and cannot be combined with `--require-approval`.
 
 ### Exports and embedding
 
@@ -180,9 +182,11 @@ For embedding, pass `createClaudeRunner(options)` to core `runSessionDaemon`, or
 
 ## 4. Approvals, GroupChat Tools & Security Boundaries
 
-![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
+### 1. Opt-in signed TaskBar approvals
 
-### 1. Signed TaskBar approval flow
+Full-auto is the default because per-tool approvals would add too many cards to GroupChat during normal coding turns. For per-tool confirmation, pass `--require-approval` to `connect` or `start`.
+
+![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
 
 1. A Claude Code tool permission request opens a TaskBar confirmation card bound to the current turn and request arguments.
 2. Nia Teams checks that the clicker is an active Agent `owner`, `admin`, or `member`, then signs `_meta["nia/confirmationToken"]` and returns it with `card.action`.

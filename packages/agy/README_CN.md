@@ -16,11 +16,11 @@ AI 编程助手请加载 [skills/nia-teams-agy/SKILL.md](./skills/nia-teams-agy/
 
 ## 一、产品背景与协作模型
 
-本包通过 `agy acp` 的 JSON-RPC 2.0 标准输入输出驱动 Google Antigravity CLI。一个桥接进程复用一个 ACP 子进程，为每个群聊创建或恢复独立会话；团队在群聊中发送任务、查看活动状态，并通过 TaskBar 确认工具执行。
+本包通过 `agy acp` 的 JSON-RPC 2.0 标准输入输出驱动 Google Antigravity CLI。一个桥接进程复用一个 ACP 子进程，为每个群聊创建或恢复独立会话；团队在群聊中发送任务并查看活动状态。
 
 - **一步创建并绑定，无需预先建 Agent 或配置 API Key**：在主机终端运行配对命令，在任意设备的浏览器打开生成的链接并登录 Nia Teams，即可新建外部 Agent 并绑定主机公钥。
 - **群聊实时状态与多轮会话隔离**：群聊底部显示该外部 Agent 的在线状态（`未连接`、`空闲待命`、`Thinking…`、`等待确认`）。每个群聊使用独立的 ACP 会话，后续任务沿用该群聊上下文；各群聊共享主机上的代码目录。
-- **TaskBar 权限确认与群聊工具**：当 Google Antigravity 请求工具权限时，群聊底部 TaskBar 会弹出权限确认卡，由该 Agent 的成员点击 **允许执行**。Agent 也可通过群聊工具发送进度、读取历史。
+- **群聊工具**：Agent 可发送进度和读取历史。
 
 ![Nia Teams 群聊与 Agent 活动状态](./docs/assets/group-chat-overview.png)
 
@@ -29,7 +29,7 @@ AI 编程助手请加载 [skills/nia-teams-agy/SKILL.md](./skills/nia-teams-agy/
 | Agent 运行时 | 模型、工具、工作目录与 Google Antigravity CLI（`agy`）的登录 | 群聊到运行时会话映射、查询与取消 | 外部 Agent 身份与归属 |
 | 连接与认证 | 本机 Node.js 进程与 `agy acp` 服务 | Ed25519 凭证、WebSocket 长连接与重连 | 浏览器配对、challenge/lease 与消息投递 |
 | 群聊对话 | 推理轮次与本地任务 | 提示格式、会话恢复与回复发布 | 群聊时间线、成员与活动状态 |
-| 人工确认与安全边界 | `agy acp` 工具权限与执行范围 | 将工具权限请求显示为 TaskBar 确认卡、RS256 验签与请求匹配 | TaskBar 卡片、Agent 成员权限与签名 |
+| 人工确认与安全边界 | `agy acp` 工具权限与执行范围 | 默认免确认；可选 TaskBar 签名确认卡 | TaskBar 卡片、Agent 成员权限与签名 |
 
 ## 二、五步快速接入（从零到在群里对话）
 
@@ -123,6 +123,8 @@ pgrep -af '[n]ia-agy.*start'
 
 取消会发送 `session/cancel` 通知。`agy acp` 服务在 2 秒内仍未结束时，桥接结束该子进程，必要时在 SIGTERM 后追加 SIGKILL。该进程中的其他活跃轮次随之失败，不重放；后续任务重新初始化子进程并恢复已保存会话。
 
+免确认模式向 `agy acp` 传入 `--dangerously-skip-permissions`，未指定 `--mode` 时使用 `auto`。
+
 ### 第 4 步：把外部 Agent 拉进群聊并验证在线状态
 
 点击配对成功页的 **前往群聊**，或打开 [Nia Teams](https://nia-teams.com) 进入左侧 **消息** 页：
@@ -156,7 +158,7 @@ nia-agy pair [--server-url <origin>] [--config-dir <dir>]
 nia-agy status [--config-dir <dir>]
 nia-agy start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
               [--mode default|accept-edits|auto|plan] [--sandbox]
-              [--full-auto] [--bypass-approvals] [--agy-bin <path>]
+              [--require-approval] [--agy-bin <path>]
 nia-agy --help
 ```
 
@@ -168,7 +170,9 @@ nia-agy --help
 - `--model`：调用 `session/set_model` 选择 agy 返回的可用模型；不硬编码账号模型列表。
 - `--mode`：调用 `session/set_mode`；支持 `default`、`accept-edits`、`auto`、`plan`，具体执行权限由 agy 解释。
 - `--sandbox`：布尔开关，向 `agy acp` 传入同名标志；不是 Codex 的字符串 sandbox 选项。
-- `--full-auto` / `--bypass-approvals`：跳过桥接确认并向 agy 传入 `--dangerously-skip-permissions`；未显式选择模式时设为 `auto`，显式模式优先。
+- `--require-approval`：在群聊 TaskBar 中确认运行时发来的工具权限请求。
+
+兼容旧命令的 `--full-auto` 和 `--bypass-approvals` 与默认行为相同，不能与 `--require-approval` 同用。
 - `--agy-bin` / `AGY_BIN`：指定本机 agy 可执行文件，未指定时按 PATH 和常见安装目录发现。
 - `--help` / `-h`：显示命令概览；无命令时也显示帮助。
 
@@ -189,9 +193,11 @@ nia-agy --help
 
 ## 四、权限确认、群聊工具与安全边界
 
-![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
+### 1. 可选的 TaskBar 签名确认
 
-### 1. TaskBar 签名确认流程
+日常编程会触发多次工具调用，默认免确认可避免群聊出现过多确认卡。需要逐项确认时，在 `connect` 或 `start` 加上 `--require-approval`。
+
+![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
 
 1. 收到当前会话的 `session/request_permission` 时，桥接创建 TaskBar 卡，保存 ACP session、toolCall、options 和当前轮次。
 2. Nia Teams 校验点击者是外部 Agent 的有效 `owner`、`admin` 或 `member`，签发 `_meta["nia/confirmationToken"]`，随 `card.action` 送回主机。
@@ -199,7 +205,7 @@ nia-agy --help
 4. 验证 `context_server: agent-bridge`、`context_tool: agy.approval`、canonical JSON 参数的 SHA-256 摘要及 `confirmation_card_id === cardId`。验证对象来自本机保存的请求，不从聊天正文重建。
 5. 通过后只批准该次请求；缺失/无效 Token、忽略卡片、超时或取消均拒绝。待确认卡默认 5 分钟到期。
 
-ACP 批准结果返回 `outcome: { outcome: "selected", optionId }`，批准只选择 `allow_once`，拒绝选择 `reject_once`。没有安全的一次性选项时返回 cancelled，不把一次批准升级为 allow_always。未知会话和已结束轮次不能批准；`--full-auto` 也不改变这个匹配规则。
+默认免确认模式在本机处理权限请求；使用 `--require-approval` 时，工具请求需经过 TaskBar 签名确认。两种模式都只处理当前会话的有效轮次：ACP 通过 `outcome: { outcome: "selected", optionId }` 返回一次性决定，批准选择 `allow_once`，拒绝选择 `reject_once`。缺少适用的一次性选项时返回 `cancelled`。
 
 ### 2. 群聊工具、消息与原生提及
 

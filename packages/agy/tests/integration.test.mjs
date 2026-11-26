@@ -49,11 +49,12 @@ test('explicit resume JSON-RPC error starts a new session and replaces the mappi
   assert.equal((await events()).filter(e => e.method === 'session/new').length, 2);
 });
 for (const verdict of ['approved','tampered','canceled','timeout']) test(`signed TaskBar permission ${verdict} selects the expected ACP option`, async t => {
-  const { f, host, events, errors } = await setup(t, { approvalTimeoutMs: 250 });
+  const { f, host, events, errors } = await setup(t, { fullAuto: false, approvalTimeoutMs: 250 });
   host.message(message('numeric permission'));
   await until(() => f.rpcs.some(r => r.method === 'card.upsert'));
   const card = f.rpcs.find(r => r.method === 'card.upsert');
   assert.equal(card.params.verifyToolName, 'agy.approval');
+  assert.deepEqual((await events()).find(e => e.kind === 'spawn').args, ['acp']);
   assert.equal(card.params.verifyArguments.tool, 'agy:run_command');
   if (verdict !== 'timeout') await f.confirm(card, { tamper: verdict === 'tampered', decision: verdict === 'canceled' ? 'canceled' : 'approved' });
   await until(() => idles(f).length >= 1, 'first reply', 10000);
@@ -62,8 +63,8 @@ for (const verdict of ['approved','tampered','canceled','timeout']) test(`signed
   assert.equal((await events()).find(e => e.kind === 'response').frame.id, 1);
   assert.equal(errors.length > 0, verdict === 'tampered');
 });
-test('full-auto sets spawn flags and auto mode/model without creating a card', async t => {
-  const { f, host, events } = await setup(t, { fullAuto: true, sandbox: true, model: 'test-model' });
+test('default full-auto sets spawn flags and auto mode/model without creating a card', async t => {
+  const { f, host, events } = await setup(t, { sandbox: true, model: 'test-model' });
   host.message(message('permission')); await until(() => idles(f).length >= 1, 'first reply', 10000);
   const e = await events();
   assert.deepEqual(e.find(e => e.kind === 'spawn').args, ['acp','--dangerously-skip-permissions','--sandbox']);
@@ -72,7 +73,7 @@ test('full-auto sets spawn flags and auto mode/model without creating a card', a
   assert.equal(sends(f).length, 0); assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
 });
 test('explicit plan mode takes precedence over the full-auto default', async t => {
-  const { f, host, events } = await setup(t, { fullAuto: true, mode: 'plan' });
+  const { f, host, events } = await setup(t, { mode: 'plan' });
   host.message(message('hello')); await until(() => idles(f).length >= 1, 'first reply', 10000);
   assert.equal((await events()).find(e => e.method === 'session/set_mode').params.modeId, 'plan');
 });
@@ -132,7 +133,7 @@ test('oversized assistant text is ignored and never published', async t => {
   host.message(message('recover'));await until(()=>idles(f).length >= 2,'recovered output',10000);
 });
 test('cancel during signed approval denies the pending tool and allows a subsequent silent turn', async t => {
-  const {f,host,events}=await setup(t);host.message(message('permission'));
+  const {f,host,events}=await setup(t,{fullAuto:false});host.message(message('permission'));
   await until(()=>f.rpcs.some(r=>r.method==='card.upsert'),'pending permission',10000);
   host.cancel({...message(),type:'thread.cancel',reason:'user_aborted'});
   host.message(message('next'));await until(()=>idles(f).length >= 1,'next',10000);
@@ -213,7 +214,7 @@ test('AGY registers every server tool normally and preserves formatted content w
 });
 
 test('explicit prompt timeout cancels only its session and a concurrent turn survives on the shared child', async t => {
-  const { f, host, events, errors } = await setup(t, { promptTimeoutMs: 2000 });
+  const { f, host, events, errors } = await setup(t, { fullAuto: false, promptTimeoutMs: 2000 });
   host.message(message('hold until timeout'));
   let records;
   for (let i = 0; i < 400; i++) {

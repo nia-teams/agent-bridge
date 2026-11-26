@@ -148,6 +148,7 @@ test('connections save credentials before opening a valid handoff or rejecting a
 
 test('daemon start arguments preserve runtime parameters without connection-only values', () => {
   assert.deepEqual(connectDaemonArgs({ 'group-link': 'SECRET', 'agent-name': 'Helper', 'no-browser': true, cwd: '/tmp/work', model: 'example', daemon: true, 'full-auto': true }), ['start', '--daemon', '--cwd', '/tmp/work', '--model', 'example', '--full-auto']);
+  assert.deepEqual(connectDaemonArgs({ 'no-browser': true, 'require-approval': true }), ['start', '--daemon', '--require-approval']);
 });
 
 for (const protocol of ['http:', 'https:']) test(`connect requires the ${protocol} bridge origin and exact handoff path, even without browser`, async t => {

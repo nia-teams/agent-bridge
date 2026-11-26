@@ -20,7 +20,7 @@ a1bd88faf1f7c28d27d5975d2882ccd91d9b9206fdb0c5014d899519619a6aa9  tencent-ai-age
 602071561129a332c88b628650a3e15925a84a82f5cccce7b5cc4fbfbb0509a2  tencent-ai-codebuddy-code-2.180.0.tgz
 ```
 
-TaskBar cards bind the full tool/input, active turn identity, and card ID through core `verifyCardApproval`, tool `workbuddy.approval`, server `agent-bridge`. UI clicks alone grant nothing. GroupChat tool calls are scoped by host context, not a model-supplied chat/session identifier.
+Omitted `fullAuto` selects `permissionMode: bypassPermissions` and `allowDangerouslySkipPermissions: true`. `--require-approval` sets `fullAuto: false`, selecting `permissionMode: default` and `allowDangerouslySkipPermissions: false`. In opt-in mode, TaskBar cards bind the full tool/input, active turn identity, and card ID through core `verifyCardApproval`, tool `workbuddy.approval`, server `agent-bridge`. UI clicks alone grant nothing. GroupChat tool calls are scoped by host context, not a model-supplied chat/session identifier.
 
 The runner appends `ready.systemPrompt` to SDK instructions and registers all definitions from `ready.tools`. SDK result text stays local; replies require explicit `send_message`. Turn completion reports `thread.activity` with `state: 'idle'` and the processed `deliveryId`. Silent-turn reminders arrive as server `thread.message` prompts.
 

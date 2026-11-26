@@ -29,9 +29,11 @@ export class AgyRunner {
   private readonly children = new Set<AcpClient>();
   private readonly relay = new McpRelay();
   private readonly active = new Map<string, Active>();
+  private readonly fullAuto: boolean;
   private closed = false;
   readonly run: TurnRunner = context => this.turn(context);
   constructor(private readonly options: AgyOptions) {
+    this.fullAuto = options.fullAuto ?? true;
     if (options.mode && !['default', 'accept-edits', 'auto', 'plan'].includes(options.mode)) throw new Error('Invalid ACP mode');
     for (const value of [options.requestTimeoutMs, options.promptTimeoutMs]) if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw new Error('ACP timeouts must be positive');
   }
@@ -47,7 +49,7 @@ export class AgyRunner {
       await this.relay.start();
       signal.throwIfAborted();
       if (this.closed) throw new Error('Agy runner is closed');
-      const args = ['acp', ...(this.options.fullAuto ? ['--dangerously-skip-permissions'] : []), ...(this.options.sandbox ? ['--sandbox'] : [])];
+      const args = ['acp', ...(this.fullAuto ? ['--dangerously-skip-permissions'] : []), ...(this.options.sandbox ? ['--sandbox'] : [])];
       const client = new AcpClient(binary, args, this.options.requestTimeoutMs); this.client = client; this.children.add(client);
       client.onMessage = message => this.message(client, message);
       client.onExit = () => {
@@ -98,7 +100,7 @@ export class AgyRunner {
       if (!sid || (typeof result.sessionId === 'string' && result.sessionId !== sid) || this.active.has(sid)) throw new Error('ACP session identity mismatch');
       await context.session(`v2:${sid}`);
       const active: Active = { client, context, prompting: false }; this.active.set(sid, active);
-      const mode = this.options.mode ?? (this.options.fullAuto ? 'auto' : undefined);
+      const mode = this.options.mode ?? (this.fullAuto ? 'auto' : undefined);
       if (mode) await client.request('session/set_mode', { sessionId: sid, modeId: mode });
       if (this.options.model) await client.request('session/set_model', { sessionId: sid, modelId: this.options.model });
       context.signal.throwIfAborted();
@@ -144,7 +146,7 @@ export class AgyRunner {
         const tool = `agy:${String(params.toolCall.name ?? params.toolCall.title ?? params.toolCall.toolCallId ?? 'tool')}`;
         const name = String(params.toolCall.name ?? '');
         const collaboration = name.startsWith('mcp__nia-teams__') || name.startsWith('nia-teams___') || params.toolCall.serverName === 'nia-teams';
-        const result = collaboration ? { behavior: 'allow' } : await active.context.permission(tool, { sessionId: params.sessionId, toolCall: params.toolCall, options: params.options });
+        const result = collaboration || this.fullAuto ? { behavior: 'allow' } : await active.context.permission(tool, { sessionId: params.sessionId, toolCall: params.toolCall, options: params.options });
         allowed = result.behavior === 'allow' && !active.context.signal.aborted && this.active.get(String(params.sessionId)) === active;
       } catch { allowed = false; }
     }

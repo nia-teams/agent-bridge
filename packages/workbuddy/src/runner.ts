@@ -192,6 +192,7 @@ async function workBuddyEnvironment(binary: string, signal: AbortSignal): Promis
 }
 export function createWorkBuddyRunner(options: WorkBuddyOptions): TurnRunner {
   const model = resolveWorkBuddyModel(options.model);
+  const fullAuto = options.fullAuto ?? true;
   return async context => {
     const binary = await resolveCodeBuddyBinary(options.codebuddyBin);
     context.signal.throwIfAborted();
@@ -207,12 +208,17 @@ export function createWorkBuddyRunner(options: WorkBuddyOptions): TurnRunner {
     try {
       return await consumeSdkQuery(query({ prompt: context.prompt, options: {
         pathToCodebuddyCode: binary, env, cwd: options.cwd, model, resume: context.resume,
-        abortController: controller, permissionMode: options.fullAuto ? 'bypassPermissions' : 'default', allowDangerouslySkipPermissions: Boolean(options.fullAuto),
+        abortController: controller, permissionMode: fullAuto ? 'bypassPermissions' : 'default', allowDangerouslySkipPermissions: fullAuto,
         settingSources: ['user', 'project', 'local'], systemPrompt: { append: context.systemPrompt },
         mcpServers: { nia: server as unknown as import('@tencent-ai/agent-sdk').McpSdkServerConfig, ...(context.tools.some(t => t.deferLoading) ? { nia_deferred: await deferred.start() } : {}) },
         canUseTool: async (name, input, detail) => {
           // Collaboration tools own their server-side authorization and confirmations.
           if (name.startsWith('mcp__nia__') || name.startsWith('mcp__nia_deferred__')) return { behavior: 'allow', updatedInput: input };
+          if (fullAuto && name !== 'AskUserQuestion') {
+            controller.signal.throwIfAborted();
+            detail.signal?.throwIfAborted();
+            return { behavior: 'allow', updatedInput: input };
+          }
           const result = await context.permission(name, input, detail.signal);
           return result.behavior === 'allow' ? { behavior: 'allow', updatedInput: result.updatedInput ?? input } : { behavior: 'deny', message: result.message ?? 'Denied' };
         },

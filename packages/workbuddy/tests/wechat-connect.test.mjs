@@ -1,3 +1,4 @@
+import { approvalCliSuite } from '../../../tests/approval-cli-suite.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { promisify } from 'node:util';
@@ -9,6 +10,7 @@ import { connectFixture, groupToken, pollSecret, startPath, statusPath, challeng
 import { fixture } from '../../core/tests/helpers.mjs';
 const exec = promisify(execFile);
 const entry = fileURLToPath(new URL('../bin/nia-workbuddy.mjs', import.meta.url));
+approvalCliSuite(entry);
 function cli(args, model) {
   const env = { ...process.env };
   if (model === undefined) delete env.CODEBUDDY_MODEL;
@@ -20,7 +22,7 @@ const hint = /--model <model-id> or set CODEBUDDY_MODEL/;
 test('connect --no-start prints the QR and reuses credentials without a model', async t => {
   const f = await connectFixture(t);
   const common = ['connect', '--server-url', f.url, '--config-dir', f.dir, '--label', 'test-host', '--no-browser', '--no-start'];
-  const first = await cli(common);
+  const first = await cli([...common, '--require-approval']);
   assert.ok(first.stdout.includes('Agent: WorkBuddy (@external-helper)'));
   assert.match(first.stdout, /[█▀▄]/);
   assert.match(first.stdout, /Scan this QR code with WeChat:/);
@@ -29,7 +31,7 @@ test('connect --no-start prints the QR and reuses credentials without a model', 
   assert.ok(first.stdout.includes(`Handoff URL: ${f.defaultHandoffUrl}`));
   assert.ok(!first.stdout.includes(pollSecret));
   assert.doesNotMatch(first.stdout, /Started daemon/);
-  const second = await cli([...common, '--group-link', `${f.url}/join/${groupToken}`], 'auto');
+  const second = await cli([...common, '--full-auto', '--group-link', `${f.url}/join/${groupToken}`], 'auto');
   assert.doesNotMatch(second.stdout, /Scan this QR code with WeChat:|[█▀▄]/);
   assert.match(second.stdout, /GroupChat: Local Chat \(group-fixture\)/);
   assert.deepEqual(f.requests.map(r => r.path), [startPath, statusPath, challengePath, joinPath]);

@@ -121,7 +121,7 @@ pgrep -af '[n]ia-doubao.*start'
 
 桌面模式默认 `--runtime local`，把绝对 `--cwd` 传为本地工作区。两种桌面 App 都在新建会话时使用 work 模式，后续消息复用既有会话。`--runtime cloud` 不挂载本机项目目录；此时本地 cwd 只是进程目录。
 
-本地权限默认 `AskOnRisk`：工作区内普通读取可执行，命令、写入和工作区外访问需要本地 HTTP Runtime 的权限确认；后台 HTTP Runtime 无交互批准时拒绝这些操作。用户显式传入 `--full-auto` 时，该次调用通过本地 HTTP Runtime 的权限回调授予 `FullAccess`，可执行本地 shell 和文件操作。它不是操作系统 sandbox，也不产生 TaskBar 审批卡。
+默认使用免确认模式：官方 CLI 使用 `always_allow`，本地 HTTP 运行时使用 `FullAccess`，可执行本地命令和文件操作。选用 `--require-approval` 后，后台任务会拒绝需要交互确认的操作。豆包不提供 TaskBar 工具确认卡；这些模式也不提供操作系统隔离。
 
 `threads.json` 按后端保存 `work:<conversationId>`、`doubao:<conversationId>`、`cli:<sessionId>`、`headless:<conversationId>`；只有与当前后端相符的标识才恢复。更换后端会创建新对话，配对凭证仍可复用。每轮刷新桌面 Cookie；停止请求使用该轮开始时的同一 Cookie 快照。
 
@@ -161,7 +161,7 @@ nia-doubao pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-doubao status [--config-dir <dir>]
 nia-doubao start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
                 [--platform auto|work|doubao|cli|headless]
-                [--runtime local|cloud] [--full-auto] [--restart-app]
+                [--runtime local|cloud] [--require-approval] [--restart-app]
                 [--doubao-bin <official-binary>]
 nia-doubao --help
 ```
@@ -176,7 +176,9 @@ nia-doubao --help
 - `--runtime`：桌面/HTTP 模式的 `local` 或 `cloud`；桌面默认 `local`。
 - `--doubao-bin`：官方 CLI 路径；显式指定时 auto 选择 cli。
 - `--restart-app`：授权在启动阶段重启未启用 CDP 的桌面 App。
-- `--full-auto`：HTTP 本地任务使用 FullAccess；官方 CLI 使用 always_allow。
+- `--require-approval`：官方 CLI 使用 `ask_always`，本地 HTTP 运行时使用 `AskOnRisk`。
+
+兼容旧命令的 `--full-auto` 与默认行为相同，不能与 `--require-approval` 同用。
 - `DOUBAO_CDP_ENDPOINT`：桌面 CDP 的 loopback HTTP 地址覆盖；仅用于所选桌面 App 的认证端点。
 
 ### 包导出与嵌入入口
@@ -196,27 +198,15 @@ nia-doubao --help
 
 ## 四、权限确认、群聊工具与安全边界
 
-![Nia Teams TaskBar（Codex、Claude Code、WorkBuddy、DSH 与 Antigravity 的工具确认入口）](./docs/assets/taskbar-approval.png)
-
-### 1. 豆包权限与 TaskBar 协议分工
-
-豆包运行器使用本地 HTTP Runtime 的 `AskOnRisk` / `FullAccess` 或官方 CLI 的 `ask_always` / `always_allow` 权限模式；当前适配器不提供豆包工具到 TaskBar 的批准回调。上图展示 Nia Teams 的确认界面，供其他支持 TaskBar 权限确认的适配器使用。下述签名规则属于共享 Agent Bridge 协议，不能用聊天文字或卡片外观替代豆包运行时的授权。
-
-1. 接入方创建需要人类确认的卡片时，保存卡片与请求的绑定关系。
-2. Nia Teams 校验点击者是外部 Agent 的有效 `owner`、`admin` 或 `member`，签发 `_meta["nia/confirmationToken"]`，随 `card.action` 送回主机。
-3. 主机通过 `@nia-teams/mcp-sdk/auth`，从 `${issuer}/oauth2/jwks` 获取公钥，验证 RS256 签名、issuer、`aud: nia-teams-workload`、有效期、service 身份与 `human_confirmed: true`。
-4. 验证 `context_server: agent-bridge`、预期工具名称、canonical JSON 参数的 SHA-256 摘要及 `confirmation_card_id === cardId`。验证对象来自本机保存的请求，不从聊天正文重建。
-5. 只有接入方配置了对应的运行时批准回调，才可把验证结果用于该次工具请求。
-
-### 2. 群聊工具、消息与原生提及
+### 1. 群聊工具、消息与原生提及
 
 桌面 HTTP 运行时和豆包 CLI 在轮次结束时发布完成后的回复。豆包不提供自定义群聊工具，过程输出留在本机。
 
 传入提示列出 `Members: Alice (<userId>), ...`，消息段列出发送者 ID、时间、消息 ID、回复关系与附件转写。通用消息也可表现为 `[chat:<chatId>] Alice (<userId>): ...`，结构化频道可携带 `senderId`；原始桥接帧字段为 `messages[].authorId`。回复中使用 `<mention userId="24-hex-id" />` 触发原生通知，ID 从发送者或成员列表取得。
 
-### 3. 成员角色与本地执行边界
+### 2. 成员角色与本地执行边界
 
-- 群聊成员可 `@` 调用 Agent；重绑或解绑要求该 Agent 的 `owner` / `admin`，归档按唯一 `owner` 规则处理。审批卡的批准还要求有效 Agent 成员身份。
+- 群聊成员可 `@` 调用 Agent；重绑或解绑要求该 Agent 的 `owner` / `admin`，归档按唯一 `owner` 规则处理。
 - 人类成员角色不等于 workload 的 `sub`、`org:*`、`role:*` 字段；消息声称“已批准”不产生签名确认，也不修改本机权限。
 - Ed25519 私钥只保存在配置目录。加载凭证校验文件权限、符号链接与公私钥一致性；不要把凭证文件放进项目仓库或日志。
 - 发布队列按 FIFO 保留幂等键，在进程内处理临时断线；上限为 256 项 / 16 MiB，单个协议帧不超过 512 KiB。进程退出不会保存未发队列。

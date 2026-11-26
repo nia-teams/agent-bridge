@@ -9,9 +9,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     'group-link': { type: 'string' }, 'agent-name': { type: 'string' }, 'no-browser': { type: 'boolean' }, 'no-start': { type: 'boolean' },
     daemon: { type: 'boolean' }, 'log-file': { type: 'string' },
-    'server-url': { type: 'string' }, 'config-dir': { type: 'string' }, name: { type: 'string' }, label: { type: 'string' }, cwd: { type: 'string' }, model: { type: 'string' }, 'full-auto': { type: 'boolean' }, 'codebuddy-bin': { type: 'string' }, help: { type: 'boolean', short: 'h' },
+    'server-url': { type: 'string' }, 'config-dir': { type: 'string' }, name: { type: 'string' }, label: { type: 'string' }, cwd: { type: 'string' }, model: { type: 'string' }, 'require-approval': { type: 'boolean' }, 'full-auto': { type: 'boolean' }, 'codebuddy-bin': { type: 'string' }, help: { type: 'boolean', short: 'h' },
   } });
-  if (values.help || positionals.length === 0) { console.log('nia-workbuddy connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--model <model>] [--daemon] [--log-file <path>]\nnia-workbuddy pair [--server-url <url>] [--config-dir <dir>] [--name <label>]\nnia-workbuddy status [--config-dir <dir>]\nnia-workbuddy stop [--config-dir <dir>]\nnia-workbuddy start [--daemon] [--log-file <path>] [--config-dir <dir>] [--cwd <dir>] [--model <model>] [--full-auto] [--codebuddy-bin <path>]\nStarting WorkBuddy requires a concrete model ID via --model or CODEBUDDY_MODEL.'); return; }
+  if (values['require-approval'] && values['full-auto']) throw new Error('--require-approval cannot be combined with --full-auto');
+  const fullAuto = !values['require-approval'];
+  if (values.help || positionals.length === 0) { console.log('nia-workbuddy connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--require-approval] [--model <model>] [--daemon] [--log-file <path>]\nnia-workbuddy pair [--server-url <url>] [--config-dir <dir>] [--name <label>]\nnia-workbuddy status [--config-dir <dir>]\nnia-workbuddy stop [--config-dir <dir>]\nnia-workbuddy start [--daemon] [--log-file <path>] [--config-dir <dir>] [--cwd <dir>] [--model <model>] [--require-approval] [--codebuddy-bin <path>]\nStarting WorkBuddy requires a concrete model ID via --model or CODEBUDDY_MODEL.\nFull-auto is the default; --full-auto is accepted for compatibility.'); return; }
   if (positionals.length !== 1) throw new Error('Expected one command');
   const configDir = resolve(values['config-dir'] ?? defaultConfigDir('nia-teams-workbuddy', 'NIA_WORKBUDDY_CONFIG_DIR'));
   if (positionals[0] === 'connect') {
@@ -36,5 +38,5 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (await maybeRespawnDaemon(args, resolve(configDir, 'daemon.log'))) return;
 
   const cwd = resolve(values.cwd ?? process.cwd());
-  await runSessionDaemon(createWorkBuddyRunner({ cwd, model, fullAuto: values['full-auto'], codebuddyBin }), { ...clientBranding, configDir, cwd, runtime: 'WorkBuddy', approvalTool: 'workbuddy.approval', fullAuto: values['full-auto'] });
+  await runSessionDaemon(createWorkBuddyRunner({ cwd, model, fullAuto, codebuddyBin }), { ...clientBranding, configDir, cwd, runtime: 'WorkBuddy', approvalTool: 'workbuddy.approval', fullAuto });
 }

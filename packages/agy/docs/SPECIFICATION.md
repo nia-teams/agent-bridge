@@ -66,7 +66,7 @@ Optional configuration follows session setup and precedes the prompt:
 {"jsonrpc":"2.0","id":5,"method":"session/set_model","params":{"sessionId":"<sid>","modelId":"<available-model-id>"}}
 ```
 
-Modes: `default`, `accept-edits`, `auto`, `plan`. `--full-auto` / `--bypass-approvals` adds the spawn flag `--dangerously-skip-permissions` and defaults an unspecified mode to `auto`; an explicit mode wins. Model names are taken from upstream account availability.
+Modes: `default`, `accept-edits`, `auto`, `plan`. Omitted `fullAuto` adds the spawn flag `--dangerously-skip-permissions` and defaults an unspecified mode to `auto`; an explicit mode wins. `--require-approval` sets `fullAuto: false`. Model names are taken from upstream account availability.
 
 ## 4. Prompt and stream
 
@@ -93,7 +93,7 @@ Core SessionHost serializes per-chat turns; only explicit `send_message` calls p
 }
 ```
 
-The adapter invokes actual core API `context.permission('agy:<tool-name>', { sessionId, toolCall, options })`. Prefixing the tool name prevents an ACP tool from impersonating core's `AskUserQuestion` path. SessionHost adds `agentThreadId`, turn ID, and tool/input to `verifyArguments` and requests a TaskBar card with verifier tool `agy.approval`, server `agent-bridge`.
+In opt-in approval mode, the adapter invokes `context.permission('agy:<tool-name>', { sessionId, toolCall, options })`. Prefixing the tool name prevents an ACP tool from impersonating core's `AskUserQuestion` path. SessionHost adds `agentThreadId`, turn ID, and tool/input to `verifyArguments` and requests a TaskBar card with verifier tool `agy.approval`, server `agent-bridge`.
 
 Approval requires core `verifyCardApproval` to validate RS256 signature via `${issuer}/oauth2/jwks`, issuer, audience `nia-teams-workload`, service principal, human confirmation, lifetime, card ID, context tool, and canonical JSON argument SHA-256 digest. GroupChat membership alone is not Agent approval membership.
 
@@ -103,7 +103,7 @@ Approval requires core `verifyCardApproval` to validate RS256 signature via `${i
 {"jsonrpc":"2.0","id":"1","result":{"outcome":{"outcome":"cancelled"}}}
 ```
 
-Use `allow_once` on verified approval and `reject_once` on denial. For entries without a kind, exact IDs `allow` / `deny` are accepted. Never upgrade a one-shot verdict to `allow_always`. Missing safe options return cancelled. Unknown/inactive sessions cannot be approved, including full-auto. Abort, dismissal, expiry, or invalid signatures deny. A result only applies while its original turn remains active in the same child generation.
+Use `allow_once` in full-auto or on verified opt-in approval and `reject_once` on denial. For entries without a kind, exact IDs `allow` / `deny` are accepted. Never upgrade a one-shot verdict to `allow_always`. Missing safe options return cancelled. Unknown/inactive sessions cannot be approved, including full-auto. Abort, dismissal, expiry, or invalid signatures deny. A result only applies while its original turn remains active in the same child generation.
 
 ## 6. Scoped MCP transport
 

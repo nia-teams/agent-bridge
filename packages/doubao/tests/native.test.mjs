@@ -89,7 +89,7 @@ test('native turn uses official arguments, stores cli prefix, resumes only match
   assert.deepEqual(first, undefined); assert.match(sessions[0], /^cli:.+/);
   await runner(context({ resume: sessions[0] }));
   const turns = (await calls()).filter(a => a.includes('-p'));
-  assert.deepEqual(turns[0], ['-C', dir, '--permission-mode', 'ask_always', '--model', 'native-model', '-p', 'Server policy\n\nhi --literal']);
+  assert.deepEqual(turns[0], ['-C', dir, '--permission-mode', 'always_allow', '--model', 'native-model', '-p', 'Server policy\n\nhi --literal']);
   assert.equal(turns[1].at(-1), 'hello');
   assert.equal(turns[1][turns[1].indexOf('--resume') + 1], sessions[0].slice(4));
 });
@@ -99,12 +99,12 @@ for (const stale of ['work:1234567890123456789', 'doubao:1234567890123456789', '
   assert.match(saved, /^cli:/);
   assert.equal((await calls()).find(a => a.includes('-p')).includes('--resume'), false);
 });
-test('native full-auto selects always_allow; default approval fails closed and never resends', async t => {
+test('native defaults to always_allow; opt-in approval fails closed and never resends', async t => {
   const { make, calls, context } = await setup(t);
-  await assert.rejects(make()(context({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'approval-needed' })), /User input is required/);
-  assert.deepEqual(await make({ fullAuto: true })(context({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'approval-needed' })), undefined);
+  await assert.rejects(make({ fullAuto: false })(context({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'approval-needed' })), /User input is required/);
+  assert.deepEqual(await make()(context({ systemPrompt: 'Server policy', send: async () => {}, prompt: 'approval-needed' })), undefined);
   const turns = (await calls()).filter(a => a.includes('-p'));
-  assert.equal(turns.length, 2); assert.ok(turns[1].includes('always_allow'));
+  assert.equal(turns.length, 2); assert.ok(turns[0].includes('ask_always')); assert.ok(turns[1].includes('always_allow'));
 });
 test('native cancellation terminates the process group and never persists a stale final', async t => {
   const { make, calls, records, context } = await setup(t); const controller = new AbortController();

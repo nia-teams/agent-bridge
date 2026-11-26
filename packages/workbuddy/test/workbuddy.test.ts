@@ -393,7 +393,7 @@ test('real agent-sdk spawns WorkBuddy desktop ESM and standard CLI installations
     finally { process.env.PATH = path; }
   });
   await t.test('desktop MCP, permission updated input, system prompt, resume and full-auto survive real SDK protocol', async () => {
-    const first = await invoke(binary, {}, { prompt: 'permission tools' });
+    const first = await invoke(binary, { fullAuto: false }, { prompt: 'permission tools' });
     assert.deepEqual(first.sends, ['SDK interim']);
     assert.equal(first.permissions[0].name, 'Bash');
     const records = await entries();

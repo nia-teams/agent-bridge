@@ -16,11 +16,11 @@ AI 编程助手请加载 [skills/nia-teams-codex/SKILL.md](./skills/nia-teams-co
 
 ## 一、产品背景与协作模型
 
-桥接进程通过 `codex app-server` JSON-RPC 驱动本机 Codex。每个群聊使用独立且持久化的线程；团队在群聊中发起任务、查看执行状态并批准命令或文件改动。
+桥接进程通过 `codex app-server` JSON-RPC 驱动本机 Codex。每个群聊使用独立且持久化的线程；团队在群聊中发起任务并查看执行状态。
 
 - **一步创建并绑定，无需预先建 Agent 或配置 API Key**：在主机终端运行配对命令，在任意设备的浏览器打开生成的链接并登录 Nia Teams，即可新建外部 Agent 并绑定主机公钥。
 - **群聊实时状态与多轮会话隔离**：群聊底部显示该外部 Agent 的在线状态（`未连接`、`空闲待命`、`Thinking…`、`等待确认`）。每个群聊使用独立的 Codex 线程，后续任务沿用该群聊上下文；各群聊共享主机上的代码目录。
-- **TaskBar 权限确认与群聊工具**：当 OpenAI Codex 请求工具权限时，群聊底部 TaskBar 会弹出权限确认卡，由该 Agent 的成员点击 **允许执行**。Agent 也可通过群聊工具发送进度、读取历史。
+- **群聊工具**：Agent 可发送进度和读取历史。
 
 ![Nia Teams 群聊与 Agent 活动状态](./docs/assets/group-chat-overview.png)
 
@@ -29,7 +29,7 @@ AI 编程助手请加载 [skills/nia-teams-codex/SKILL.md](./skills/nia-teams-co
 | Agent 运行时 | 模型、工具、工作目录与 Codex 登录 | 群聊到运行时会话映射、查询与取消 | 外部 Agent 身份与归属 |
 | 连接与认证 | 本机 Node.js 进程与 Codex CLI | Ed25519 凭证、WebSocket 长连接与重连 | 浏览器配对、challenge/lease 与消息投递 |
 | 群聊对话 | 推理轮次与本地任务 | 提示格式、会话恢复与回复发布 | 群聊时间线、成员与活动状态 |
-| 人工确认与安全边界 | Codex 工具权限与执行范围 | 将工具权限请求显示为 TaskBar 确认卡、RS256 验签与请求匹配 | TaskBar 卡片、Agent 成员权限与签名 |
+| 人工确认与安全边界 | Codex 工具权限与执行范围 | 默认免确认；可选 TaskBar 签名确认卡 | TaskBar 卡片、Agent 成员权限与签名 |
 
 ## 二、五步快速接入（从零到在群里对话）
 
@@ -116,7 +116,7 @@ pgrep -af '[n]ia-codex.*start'
 
 同一群聊正在运行时，新消息优先通过 `turn/steer` 追加到当前轮次；Codex `app-server` 拒绝追加时排入后续轮次。群聊会话切换会中断旧轮次、拒绝旧卡片，并阻止旧结果发到新的群聊会话。群聊取消使用 `turn/interrupt`，同时清理排队输入与待确认请求。
 
-Codex 的默认 sandbox 是 `read-only`，审批策略是 `on-request`。需要修改项目时可选择 `--sandbox workspace-write`，仍保留工具确认。`danger-full-access` 放开 Codex sandbox；`--full-auto` / `--bypass-approvals` 把审批策略设为 `never`，未指定 sandbox 时改用 `workspace-write`。这两个设置分别控制执行范围和审批，不能互相替代。
+免确认模式使用 `never`，默认沙箱为 `workspace-write`。`--require-approval` 使用 `on-request`，默认沙箱为 `read-only`。显式 `--sandbox` 优先；`danger-full-access` 关闭 Codex 沙箱。
 
 流式输出留在本机，思考与工具更新同步活动状态；群聊回复通过 `send_message` 发布。
 
@@ -152,7 +152,7 @@ nia-codex pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-codex status [--config-dir <dir>]
 nia-codex start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
                 [--sandbox read-only|workspace-write|danger-full-access]
-                [--full-auto] [--bypass-approvals] [--codex-bin <path>]
+                [--require-approval] [--codex-bin <path>]
 nia-codex --help
 ```
 
@@ -164,7 +164,9 @@ nia-codex --help
 - `--help` / `-h`：显示命令概览；无命令时也显示帮助。
 - `--codex-bin / CODEX_BIN`：Codex 可执行文件；默认从 PATH 查找 `codex`。
 - `--sandbox`：`read-only`（默认）、`workspace-write`、`danger-full-access`。
-- `--full-auto / --bypass-approvals`：关闭工具确认；默认切换到 `workspace-write`。
+- `--require-approval`：在 TaskBar 中确认 Codex 发来的权限请求。
+
+兼容旧命令的 `--full-auto` 和 `--bypass-approvals` 与默认行为相同，不能与 `--require-approval` 同用。
 
 ### 包导出与嵌入入口
 
@@ -183,9 +185,11 @@ nia-codex --help
 
 ## 四、权限确认、群聊工具与安全边界
 
-![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
+### 1. 可选的 TaskBar 签名确认
 
-### 1. TaskBar 签名确认流程
+日常编程会触发多次工具调用，默认免确认可避免群聊出现过多确认卡。需要逐项确认时，在 `connect` 或 `start` 加上 `--require-approval`。
+
+![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
 
 1. Codex 请求工具权限时，桥接在 TaskBar 弹出权限确认卡，并保存当前轮次与请求参数。
 2. Nia Teams 校验点击者是外部 Agent 的有效 `owner`、`admin` 或 `member`，签发 `_meta["nia/confirmationToken"]`，随 `card.action` 送回主机。

@@ -16,11 +16,11 @@ For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat co
 
 ## 1. Product Overview & Collaboration Model
 
-The bridge drives Google Antigravity CLI through newline-delimited JSON-RPC 2.0 over `agy acp` stdio. One daemon retains one ACP child with a separate session per GroupChat. Teammates submit tasks, follow live activity, and approve tool execution through TaskBar.
+The bridge drives Google Antigravity CLI through newline-delimited JSON-RPC 2.0 over `agy acp` stdio. One daemon retains one ACP child with a separate session per GroupChat. Teammates submit tasks, follow live activity.
 
 - **Create and bind in one flow, without precreating an Agent or distributing static keys**: Start pairing on the Google Antigravity host, sign in to Nia Teams from a browser on any device, create the external Agent, and bind the host public key. The private key stays on the host.
 - **Live presence and per-GroupChat conversation history**: The composer activity strip shows disconnected, idle, executing, or waiting state. Each chat retains its own Antigravity session for later turns; the host workspace is shared.
-- **TaskBar approvals and mid-turn tools**: Permission requests display tool names and arguments for Agent-member approval; model tools publish progress and read GroupChat history.
+- **GroupChat tools**: The Agent can publish progress and read chat history.
 
 ![Nia Teams GroupChat and Agent activity](./docs/assets/group-chat-overview.png)
 
@@ -29,7 +29,7 @@ The bridge drives Google Antigravity CLI through newline-delimited JSON-RPC 2.0 
 | Agent runtime | Models, tools, workspace, Antigravity sign-in | Chat-to-runtime sessions, queries, cancellation | External Agent identity and scope |
 | Connection and auth | Local Node process and Google Antigravity CLI (`agy`) | Ed25519 credentials, WebSocket, reconnection | Browser pairing, challenge/lease, delivery |
 | Conversation | Inference turns and local tasks | Prompt formatting, session resume, publication | Timeline, members, activity |
-| Approval and safety | Antigravity tool permissions and execution scope | Display tool permission requests as TaskBar cards, verify RS256, match pending actions | TaskBar, Agent membership, signed approvals |
+| Approval and safety | Antigravity tool permissions and execution scope | Full-auto by default; signed TaskBar cards in opt-in mode | TaskBar, Agent membership, signed approvals |
 
 ## 2. Five-Step Quick Start
 
@@ -122,6 +122,8 @@ SessionHost serializes turns within a GroupChat while different ACP sessions can
 
 Abort sends `session/cancel`. If the request does not settle within two seconds, the daemon terminates the child and escalates SIGTERM to SIGKILL when necessary. Other active turns in that child fail without replay. Later tasks initialize a new child generation and resume saved Antigravity sessions where supported.
 
+Full-auto passes `--dangerously-skip-permissions` to `agy acp` and selects `auto` unless you set `--mode`.
+
 ### Step 4: Invite the external Agent and verify presence
 
 Click **Go to GroupChat** on the pairing confirmation page, or open Nia Teams **Messages** in the left navigation:
@@ -156,7 +158,7 @@ nia-agy pair [--server-url <origin>] [--config-dir <dir>]
 nia-agy status [--config-dir <dir>]
 nia-agy start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
               [--mode default|accept-edits|auto|plan] [--sandbox]
-              [--full-auto] [--bypass-approvals] [--agy-bin <path>]
+              [--require-approval] [--agy-bin <path>]
 nia-agy --help
 ```
 
@@ -168,7 +170,9 @@ nia-agy --help
 - `--model`: Select an Antigravity-available model through `session/set_model`; no account model list is hardcoded.
 - `--mode`: Configure `session/set_mode` with `default`, `accept-edits`, `auto`, or `plan`; agy interprets execution policy.
 - `--sandbox`: Boolean flag passed to `agy acp`, not the string-valued Codex sandbox option.
-- `--full-auto` / `--bypass-approvals`: Skip bridge confirmation and pass `--dangerously-skip-permissions`; default an unspecified mode to `auto`. An explicit mode wins.
+- `--require-approval`: Review tool permission requests from the runtime in TaskBar.
+
+For compatibility, `--full-auto` and `--bypass-approvals` match the default and cannot be combined with `--require-approval`.
 - `--agy-bin` / `AGY_BIN`: Select the local executable; otherwise use PATH and common installation paths.
 - `--help` / `-h`: Show command overview; no command also shows help.
 
@@ -189,9 +193,11 @@ Public export-map entries are `.` and `./package.json`. For embedding, pass `cre
 
 ## 4. Approvals, GroupChat Tools & Security Boundaries
 
-![Nia Teams TaskBar tool approval card](./docs/assets/taskbar-approval.png)
+### 1. Opt-in signed TaskBar approvals
 
-### 1. Signed TaskBar approval flow
+Full-auto is the default because per-tool approvals would add too many cards to GroupChat during normal coding turns. For per-tool confirmation, pass `--require-approval` to `connect` or `start`.
+
+![Nia Teams TaskBar tool approval card](./docs/assets/taskbar-approval.png)
 
 1. An active-session `session/request_permission` creates a TaskBar card bound to its ACP session, toolCall, options, and current turn.
 2. Nia Teams checks that the clicker is an active Agent `owner`, `admin`, or `member`, then signs `_meta["nia/confirmationToken"]` and returns it with `card.action`.
@@ -199,7 +205,7 @@ Public export-map entries are `.` and `./package.json`. For embedding, pass `cre
 4. It checks `context_server: agent-bridge`, `context_tool: agy.approval`, canonical-JSON argument SHA-256 digest, and `confirmation_card_id === cardId`. Expected values come from the locally stored request, not chat text.
 5. A valid result allows only that request. Missing/invalid tokens, dismissal, expiry, and cancellation deny it. Pending cards expire after five minutes by default.
 
-ACP replies contain `outcome: { outcome: "selected", optionId }`. Approval selects only `allow_once`; denial selects `reject_once`. Missing safe options return cancelled rather than upgrading a one-shot verdict to allow_always. Unknown or finished sessions cannot be approved, including in full-auto mode.
+The default full-auto mode handles permission requests locally; `--require-approval` uses signed TaskBar confirmations. Both modes apply only to active turns in known sessions. ACP replies use `outcome: { outcome: "selected", optionId }` for one-shot decisions: `allow_once` to approve and `reject_once` to deny. If no suitable one-shot option exists, ACP returns `cancelled`.
 
 ### 2. GroupChat tools, messages, and native mentions
 

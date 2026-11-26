@@ -51,8 +51,14 @@ export function sdkIntegrationSuite(runtime, createRunner, binKey, approvalTool)
     assert.equal(f.rpcs.find(r => (r.method === 'tool.call' && r.params.name === 'chat_history')).params.sessionId, sessionId);
     assert.deepEqual(errors, []);
   });
-  for (const outcome of ['approved', 'tampered', 'canceled']) test(`${runtime}: canUseTool → signed TaskBar ${outcome}`, async t => {
+  test(`${runtime}: default runner handles a tool permission without a TaskBar card`, async t => {
     const { f, host, errors } = await setup(t); host.message(message('permission'));
+    await until(() => idle(f).length === 1, 'full-auto idle', 10000);
+    assert.equal(f.rpcs.some(r => r.method === 'card.upsert'), false);
+    assert.deepEqual(errors, []);
+  });
+  for (const outcome of ['approved', 'tampered', 'canceled']) test(`${runtime}: canUseTool → signed TaskBar ${outcome}`, async t => {
+    const { f, host, errors } = await setup(t, { fullAuto: false }); host.message(message('permission'));
     await until(() => f.rpcs.some(r => r.method === 'card.upsert'), 'permission card', 10000);
     const card = f.rpcs.find(r => r.method === 'card.upsert');
     assert.equal(card.params.verifyToolName, approvalTool);
@@ -62,7 +68,7 @@ export function sdkIntegrationSuite(runtime, createRunner, binKey, approvalTool)
     assert.equal(errors.length > 0, outcome === 'tampered');
   });
   test(`${runtime}: cancel aborts SDK query and pending approval without publishing final`, async t => {
-    const { f, host } = await setup(t); host.message(message('permission'));
+    const { f, host } = await setup(t, { fullAuto: false }); host.message(message('permission'));
     await until(() => f.rpcs.some(r => r.method === 'card.upsert'), 'pending card', 10000);
     host.cancel({ ...message(), type: 'thread.cancel', reason: 'user_aborted' });
     await until(() => f.rpcs.some(r => r.method === 'card.cancel'));

@@ -70,6 +70,7 @@ function command(binary: string, selected: DoubaoBackend, args: string[], cwd: s
 
 /** Startup probes are shared once per runner; turns never launch/restart/open the app. */
 export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready(): Promise<void> } {
+  const fullAuto = options.fullAuto ?? true;
   for (const value of [options.acceptanceTimeoutMs, options.promptTimeoutMs]) if (value !== undefined && (!Number.isFinite(value) || value <= 0)) throw new Error('Doubao timeouts must be positive');
   let ready: Promise<void> | undefined;
   let selected: DoubaoBackend, binary: string, runtime: 'local' | 'cloud';
@@ -82,7 +83,7 @@ export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready
     if (selected === 'cli') {
       if (options.runtime && options.runtime !== 'local') throw new Error('Native CLI mode does not accept --runtime cloud; use desktop/headless for explicit runtime selection.');
       await readyNativeDoubao(binary, options.cwd, options.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY));
-      console.error(`Doubao: official CLI ready (${binary}); permission=${options.fullAuto ? 'always_allow' : 'ask_always'}. Login/QR stays in the local terminal, never Nia Teams.`);
+      console.error(`Doubao: official CLI ready (${binary}); permission=${fullAuto ? 'always_allow' : 'ask_always'}. Login/QR stays in the local terminal, never Nia Teams.`);
       return;
     }
     runtime = options.runtime ?? (selected === 'headless' ? 'cloud' : 'local');
@@ -108,7 +109,7 @@ export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready
       }
       await desktopCookies(selected);
     }
-    console.error(`Doubao: ${selected} ready; runtime=${runtime}; ${runtime === 'local' ? `workspace=${options.cwd}; permission=${options.fullAuto ? 'FullAccess' : 'AskOnRisk'}` : 'cloud runtime (local --cwd is not a cloud workspace)'}. Turns use the portable HTTP local runtime; restricted tools fail closed. --full-auto explicitly authorizes local operations; no TaskBar approval transport is configured.`);
+    console.error(`Doubao: ${selected} ready; runtime=${runtime}; ${runtime === 'local' ? `workspace=${options.cwd}; permission=${fullAuto ? 'FullAccess' : 'AskOnRisk'}` : 'cloud runtime (local --cwd is not a cloud workspace)'}. Doubao manages permissions without TaskBar cards.`);
   };
   const ensureReady = () => ready ??= initialize();
   const runner: TurnRunner = async context => {
@@ -116,7 +117,7 @@ export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready
     await ensureReady();
     context.signal.throwIfAborted();
     const resume = resumeForBackend(context.resume, selected);
-    if (selected === 'cli') return runNativeDoubao(binary, options, context, resume);
+    if (selected === 'cli') return runNativeDoubao(binary, { ...options, fullAuto }, context, resume);
     if (resume && !id(resume)) throw new Error('Stored Doubao conversation ID for this backend is invalid.');
     const cookie = selected === 'work' || selected === 'doubao' ? await desktopCookies(selected, context.signal) : undefined;
     context.signal.throwIfAborted();
@@ -165,16 +166,17 @@ export function createDoubaoRunner(options: DoubaoOptions): TurnRunner & { ready
         // The bundled driver uses Node timers internally: keep its total budget below int32 overflow.
         const timeoutSeconds = options.promptTimeoutMs !== undefined ? Math.min(2_147_000, Math.max(1, Math.ceil((options.acceptanceTimeoutMs ?? 30_000) / 1000 + options.promptTimeoutMs / 1000))) : 86_400;
         const args = ['sessions', resume ? 'send' : 'create', ...(resume ? [resume] : ['--mode', 'work']),
-          '--runtime', runtime, ...(runtime === 'local' ? ['--workspace', options.cwd, '--permission', options.fullAuto ? 'FullAccess' : 'AskOnRisk'] : []),
+          '--runtime', runtime, ...(runtime === 'local' ? ['--workspace', options.cwd, '--permission', fullAuto ? 'FullAccess' : 'AskOnRisk'] : []),
           ...(options.model ? ['--model', options.model] : []), '--wait', '--timeout', String(timeoutSeconds), '--', (resume ? context.prompt : `${context.systemPrompt}\n\n${context.prompt}`)];
-        worker.send({ args, fullAuto: Boolean(options.fullAuto) }, error => { if (error) reject(new Error('Unable to initialize Doubao task worker.')); });
+        worker.send({ args, fullAuto }, error => { if (error) reject(new Error('Unable to initialize Doubao task worker.')); });
       });
       await persist;
       context.signal.throwIfAborted();
       if (!conversationId || !runId) throw new Error('Doubao returned no valid conversationId/runId receipt; not retrying a possibly accepted message.');
       if (result.conversationId !== conversationId || result.runId !== runId) throw new Error('Doubao returned a mismatched run receipt.');
       finished = terminal(result.status);
-      if (result.status !== 'completed') throw new Error(`Doubao turn ${result.status ?? 'unknown'}; restricted operations may need approval. Use --full-auto only if you authorize local file/command execution.`);
+      if (result.status === 'waiting_input') throw new Error('Doubao turn needs interactive input; this runtime cannot complete it through TaskBar.');
+      if (result.status !== 'completed') throw new Error(`Doubao turn ${result.status ?? 'unknown'}.`);
       if (typeof result.reply?.text !== 'string' || !result.reply.text.trim()) throw new Error('Doubao completed without assistant reply.text');
       if (Buffer.byteLength(result.reply.text) > 480 * 1024) throw new Error('Doubao output exceeds bridge frame limit');
       await context.send(result.reply.text.trim());

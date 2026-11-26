@@ -11,7 +11,7 @@
 - Run `npm install`, `npm run build`, `npm run typecheck`, `npm test`, and `npm run verify:docs` before delivery.
 
 - JsonFileStore/ThreadMapStore own atomic adapter state; Codex retains its existing on-disk mapping shape through a thin wrapper. IdleSleepGuard owns macOS caffeinate.
-- SessionHost owns SDK-style single-turn lifecycles and signed cards; adapters supply only upstream runners.
+- SessionHost owns SDK-style turns and signed cards; its `fullAuto` setting stays explicit. Claude Code, Codex, Antigravity, WorkBuddy, Droid, and Doubao default to full-auto; `--require-approval` passes `fullAuto: false`. Doubao uses runtime permissions without signed tool cards.
 - WorkBuddy SDK 0.3.300 uses pathToCodebuddyCode; Claude SDK 0.3.319 uses pathToClaudeCodeExecutable. Test with real SDKs and protocol-speaking mock children.
 - Doubao 2.31.2 rejects headless interactive requests itself and exports no approval-reply or MCP path. Do not invent stream-json flags or authorize unsupported interactions.
 

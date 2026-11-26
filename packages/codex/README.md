@@ -16,11 +16,11 @@ For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat co
 
 ## 1. Product Overview & Collaboration Model
 
-The bridge drives local Codex through `codex app-server` JSON-RPC. Each GroupChat has a persistent thread; teammates submit tasks, follow activity, and approve command or file changes in chat.
+The bridge drives local Codex through `codex app-server` JSON-RPC. Each GroupChat has a persistent thread; teammates submit tasks and follow activity.
 
 - **Create and bind in one flow, without precreating an Agent or distributing static keys**: Start pairing on the OpenAI Codex host, sign in to Nia Teams from a browser on any device, create the external Agent, and bind the host public key. The private key stays on the host.
 - **Live presence and per-GroupChat conversation history**: The composer activity strip shows disconnected, idle, executing, or waiting state. Each chat retains its own Codex session for later turns; the host workspace is shared.
-- **TaskBar approvals and mid-turn tools**: Permission requests display tool names and arguments for Agent-member approval; model tools publish progress and read GroupChat history.
+- **GroupChat tools**: The Agent can publish progress and read chat history.
 
 ![Nia Teams GroupChat and Agent activity](./docs/assets/group-chat-overview.png)
 
@@ -29,7 +29,7 @@ The bridge drives local Codex through `codex app-server` JSON-RPC. Each GroupCha
 | Agent runtime | Models, tools, workspace, Codex sign-in | Chat-to-runtime sessions, queries, cancellation | External Agent identity and scope |
 | Connection and auth | Local Node process and Codex CLI | Ed25519 credentials, WebSocket, reconnection | Browser pairing, challenge/lease, delivery |
 | Conversation | Inference turns and local tasks | Prompt formatting, session resume, publication | Timeline, members, activity |
-| Approval and safety | Codex tool permissions and execution scope | Display tool permission requests as TaskBar cards, verify RS256, match pending actions | TaskBar, Agent membership, signed approvals |
+| Approval and safety | Codex tool permissions and execution scope | Full-auto by default; signed TaskBar cards in opt-in mode | TaskBar, Agent membership, signed approvals |
 
 ## 2. Five-Step Quick Start
 
@@ -115,7 +115,7 @@ GroupChats have separate model contexts but share the files, repository, and loc
 
 Messages arriving during a turn first use `turn/steer`; if the server rejects steering, they queue for a later turn. Nia session rotation interrupts the old turn, rejects its cards, and prevents its results from publishing into the new segment. GroupChat cancellation sends `turn/interrupt` and clears queued inputs and pending approvals.
 
-The default Codex sandbox is `read-only` with `on-request` approval. Choose `--sandbox workspace-write` to permit project changes while retaining confirmations. `danger-full-access` removes the Codex sandbox. `--full-auto` / `--bypass-approvals` sets approval policy to `never` and defaults an unspecified sandbox to `workspace-write`. Execution scope and approval policy are separate controls.
+Full-auto uses `never` for approval and defaults to the `workspace-write` sandbox. `--require-approval` uses `on-request` and defaults to `read-only`. An explicit `--sandbox` overrides either default. `danger-full-access` removes the Codex sandbox.
 
 Streamed output stays on the host. Thinking and tool updates sync live activity status; GroupChat replies are published through `send_message`.
 
@@ -152,7 +152,7 @@ nia-codex pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-codex status [--config-dir <dir>]
 nia-codex start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
                 [--sandbox read-only|workspace-write|danger-full-access]
-                [--full-auto] [--bypass-approvals] [--codex-bin <path>]
+                [--require-approval] [--codex-bin <path>]
 nia-codex --help
 ```
 
@@ -164,7 +164,9 @@ nia-codex --help
 - `--help` / `-h`: Show command overview; no command also displays help.
 - `--codex-bin / CODEX_BIN`: Codex executable; defaults to `codex` on PATH.
 - `--sandbox`: `read-only` (default), `workspace-write`, or `danger-full-access`.
-- `--full-auto / --bypass-approvals`: Disable tool confirmations; default to `workspace-write`.
+- `--require-approval`: Review permission requests from Codex in TaskBar.
+
+For compatibility, `--full-auto` and `--bypass-approvals` match the default and cannot be combined with `--require-approval`.
 
 ### Exports and embedding
 
@@ -183,9 +185,11 @@ For embedding, construct `CodexHost(bridge, options)`, register bridge handlers,
 
 ## 4. Approvals, GroupChat Tools & Security Boundaries
 
-![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
+### 1. Opt-in signed TaskBar approvals
 
-### 1. Signed TaskBar approval flow
+Full-auto is the default because per-tool approvals would add too many cards to GroupChat during normal coding turns. For per-tool confirmation, pass `--require-approval` to `connect` or `start`.
+
+![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
 
 1. A Codex tool permission request opens a TaskBar confirmation card bound to the current turn and request arguments.
 2. Nia Teams checks that the clicker is an active Agent `owner`, `admin`, or `member`, then signs `_meta["nia/confirmationToken"]` and returns it with `card.action`.

@@ -51,7 +51,7 @@ To notify a member with a native Nia Teams highlight, emit `<mention userId="<us
 
 `teamId` is the paired external Agent; `groupChatId` identifies the chat; `sessionId` is the current Nia Teams execution segment; `agentThreadId` is deterministic per chat and paired Agent. These are not local runtime thread IDs. All example hex IDs in specifications and tests are synthetic fixtures.
 
-One host owns each credential directory. Tool permission requires a verified signed card action bound to the expected card, tool and canonical arguments. Sender metadata, message bodies and plain text approvals cannot authorize tools. Per-chat context isolation does not isolate filesystem or OS access. Publication queues are process-local.
+One host owns each credential directory. In opt-in TaskBar approval mode, a tool permission request requires a verified signed card action bound to the expected card, tool and canonical arguments. Claude Code, Codex, Antigravity, WorkBuddy and Droid default to full-auto; `--require-approval` selects signed tool confirmations. Doubao uses runtime permission modes without TaskBar tool cards. Sender metadata, message bodies and plain text approvals cannot authorize tools. Per-chat context isolation does not isolate filesystem or OS access. Publication queues are process-local.
 
 ## WeChat connection
 

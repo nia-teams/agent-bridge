@@ -73,6 +73,7 @@ test('default runner prompt has no wall-clock timer and explicitly disables the 
     request(method, params, timeout) {
       requests.push({ method, timeout });
       if (method === 'session/new') return Promise.resolve({ sessionId: 'long-turn' });
+      if (method === 'session/set_mode') return Promise.resolve({});
       prompting(); return new Promise(resolve => { finish = resolve; });
     },
   };
@@ -81,7 +82,7 @@ test('default runner prompt has no wall-clock timer and explicitly disables the 
   t.mock.method(globalThis, 'setTimeout', (...args) => { timers.push(args[1]); return original(...args); });
   const turn = runner.run({ ...contract, signal: new AbortController().signal, prompt: 'long task', session: async () => {} });
   await started;
-  assert.deepEqual(requests, [{ method: 'session/new', timeout: undefined }, { method: 'session/prompt', timeout: null }]);
+  assert.deepEqual(requests, [{ method: 'session/new', timeout: undefined }, { method: 'session/set_mode', timeout: undefined }, { method: 'session/prompt', timeout: null }]);
   assert.deepEqual(timers, [], 'runner must not arm any default prompt wall-clock timer');
   finish({ stopReason: 'end_turn' }); await turn;
 });
@@ -147,6 +148,7 @@ test('oversized explicit AGY prompt budget clamps without immediate cancellation
     notify() { assert.fail('oversized prompt budget must not cancel immediately'); },
     request(method) {
       if (method === 'session/new') return Promise.resolve({ sessionId: 'large-budget' });
+      if (method === 'session/set_mode') return Promise.resolve({});
       started(); return new Promise(resolve => { finish = resolve; });
     },
   });

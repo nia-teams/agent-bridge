@@ -39,12 +39,14 @@ export function sdkPermissionSuite(runtime, runnerUrl, sdk, factory, binKey, ass
     try {
       const runner = (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`))[factory];
       const permissions = [];
-      await runner({ ...runnerOptions, cwd: process.cwd(), [binKey]: fileURLToPath(new URL('./fixtures/mock-sdk-cli.mjs', import.meta.url)) })({
+      await runner({ ...runnerOptions, fullAuto: false, cwd: process.cwd(), [binKey]: fileURLToPath(new URL('./fixtures/mock-sdk-cli.mjs', import.meta.url)) })({
         ...contract, tools: definitions, deliveryId: 'test', prompt: 'hello', signal: new AbortController().signal, session: async () => {},
         callTool: async name => ({ content: name === 'future_tool' ? '{"future":true}' : '{"history":[]}', ...(name === 'future_tool' ? { isError: true } : {}) }),
         permission: async (...args) => { permissions.push(args); return { behavior: 'deny', message: 'Needs approval' }; },
       });
       assertOptions(captured);
+      assert.equal(captured.permissionMode, 'default');
+      assert.equal(captured.allowDangerouslySkipPermissions, false);
       assert.equal(captured.systemPrompt.append, contract.systemPrompt);
       assert.deepEqual(listed.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), (runtime === 'Claude' ? definitions : definitions.filter(t => !t.deferLoading)).map(({ name, description, inputSchema }) => ({ name, description, inputSchema })));
       assert.equal(called.content[0].text, '{"history":[]}');
@@ -68,6 +70,19 @@ export function sdkPermissionSuite(runtime, runnerUrl, sdk, factory, binKey, ass
       }
       assert.equal(permissions.length, 3);
       assert.equal(permissions[0][2], signal);
+
+      await runner({ ...runnerOptions, cwd: process.cwd(), [binKey]: fileURLToPath(new URL('./fixtures/mock-sdk-cli.mjs', import.meta.url)) })({
+        ...contract, tools: definitions, deliveryId: 'test-auto', prompt: 'hello', signal, session: async () => {},
+        callTool: async () => ({ content: '{}' }),
+        permission: async name => {
+          assert.equal(name, 'AskUserQuestion');
+          return { behavior: 'deny', message: 'Needs an answer' };
+        },
+      });
+      assert.equal(captured.permissionMode, 'bypassPermissions');
+      assert.equal(captured.allowDangerouslySkipPermissions, true);
+      assert.deepEqual(await captured.canUseTool('Bash', input, { signal }), { behavior: 'allow', updatedInput: input });
+      assert.deepEqual(await captured.canUseTool('AskUserQuestion', input, { signal }), { behavior: 'deny', message: 'Needs an answer' });
     } finally { delete globalThis[key]; }
   });
 }

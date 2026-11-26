@@ -37,9 +37,11 @@ export class CodexHost {
   private readonly operations = new Map<string, Promise<void>>();
   private readonly cards = new Map<string, Approval>();
   private readonly unregister: Array<() => void> = [];
+  private readonly fullAuto: boolean;
   private closed = false;
   private readonly sleep = new IdleSleepGuard();
   constructor(private readonly bridge: CodexBridge, private readonly options: CodexOptions) {
+    this.fullAuto = options.fullAuto ?? true;
     this.lease = new ActivityLease(bridge, { intervalMs: options.activityRefreshMs, onError: error => this.report(error) });
     this.app = new AppServer(options.codexBin);
     this.store = new ThreadStore(options.configDir);
@@ -100,7 +102,7 @@ export class CodexHost {
     const provider = config.config?.model_provider ?? 'openai';
     const dynamicTools = dynamicToolSpecs(contract.tools, provider);
     const fingerprint = toolsFingerprint(dynamicTools);
-    const common = { cwd: this.options.cwd, model: this.options.model, sandbox: this.options.sandbox ?? (this.options.fullAuto ? 'workspace-write' : 'read-only'), approvalPolicy: this.options.fullAuto ? 'never' : 'on-request', approvalsReviewer: 'user', developerInstructions: contract.systemPrompt };
+    const common = { cwd: this.options.cwd, model: this.options.model, sandbox: this.options.sandbox ?? (this.fullAuto ? 'workspace-write' : 'read-only'), approvalPolicy: this.fullAuto ? 'never' : 'on-request', approvalsReviewer: 'user', developerInstructions: contract.systemPrompt };
     let result: JsonObject | undefined;
     const saved = this.store.get(frame.agentThreadId);
     if (saved && saved.groupChatId !== frame.groupChatId) throw new Error('Thread mapping belongs to a different GroupChat');
@@ -204,7 +206,7 @@ export class CodexHost {
   private async approval(message: ServerMessage, thread?: Thread): Promise<void> {
     const p = message.params ?? {}, id = message.id!;
     if (!thread?.turn || (p.turnId && p.turnId !== thread.turn.id)) { this.app.respond(id, this.decision(message.method, false)); return; }
-    if (this.options.fullAuto) { this.app.respond(id, this.decision(message.method, true)); return; }
+    if (this.fullAuto) { this.app.respond(id, this.decision(message.method, true)); return; }
     const cardId = `agent_bridge:${this.bridge.credentials.teamId}:codex:${randomUUID()}`;
     const item = thread.items.get(p.itemId ?? p.callId);
     const args = { threadId: thread.codexId, turnId: thread.turn.id, requestId: id, method: message.method, request: p, ...(item ? { item } : {}) };

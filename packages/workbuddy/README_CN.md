@@ -18,11 +18,11 @@ AI 编程助手请加载 [skills/nia-teams-workbuddy/SKILL.md](./skills/nia-team
 
 ## 一、产品背景与协作模型
 
-本包通过 CodeBuddy Agent SDK 执行任务，复用桌面应用或 CLI 的本机登录。群聊各自保存会话，团队成员通过 TaskBar 确认工具请求。
+本包通过 CodeBuddy Agent SDK 执行任务，复用桌面应用或 CLI 的本机登录。群聊各自保存会话。
 
 - **一步创建并绑定，无需预先建 Agent 或配置 API Key**：在主机终端运行配对命令，在任意设备的浏览器打开生成的链接并登录 Nia Teams，即可新建外部 Agent 并绑定主机公钥。
 - **群聊实时状态与多轮会话隔离**：群聊底部显示该外部 Agent 的在线状态（`未连接`、`空闲待命`、`Thinking…`、`等待确认`）。每个群聊使用独立的 CodeBuddy 会话，后续任务沿用该群聊上下文；各群聊共享主机上的代码目录。
-- **TaskBar 权限确认与提问交互**：当 WorkBuddy / CodeBuddy 请求执行命令、修改文件等操作的权限时，群聊底部 TaskBar 会弹出权限确认卡。该 Agent 的成员可点击 **允许执行**；普通提问在群消息中等待回复。
+- **群聊提问**：Agent 可在群聊中提问并等待任务发起人回复。
 
 ![Nia Teams 群聊与 Agent 活动状态](./docs/assets/group-chat-overview.png)
 
@@ -31,7 +31,7 @@ AI 编程助手请加载 [skills/nia-teams-workbuddy/SKILL.md](./skills/nia-team
 | Agent 运行时 | 模型、工具、工作目录与 CodeBuddy 登录 | 群聊到运行时会话映射、查询与取消 | 外部 Agent 身份与归属 |
 | 连接与认证 | 本机 Node.js 进程与 WorkBuddy 桌面端或 CodeBuddy CLI | Ed25519 凭证、WebSocket 长连接与重连 | 浏览器配对、challenge/lease 与消息投递 |
 | 群聊对话 | 推理轮次与本地任务 | 提示格式、会话恢复与回复发布 | 群聊时间线、成员与活动状态 |
-| 人工确认与安全边界 | CodeBuddy 工具权限与执行范围 | 将工具权限请求显示为 TaskBar 确认卡、RS256 验签与请求匹配 | TaskBar 卡片、Agent 成员权限与签名 |
+| 人工确认与安全边界 | CodeBuddy 工具权限与执行范围 | 默认免确认；可选 TaskBar 签名确认卡 | TaskBar 卡片、Agent 成员权限与签名 |
 
 ## 二、五步快速接入（从零到在群里对话）
 
@@ -118,9 +118,9 @@ pgrep -af '[n]ia-workbuddy.*start'
 
 SDK 的 system、assistant 与 result 事件仅用于保存会话和同步活动状态。终端输出留在本机，群聊回复通过 `send_message` 发布。
 
-`canUseTool` 收到的工具请求显示为 TaskBar 权限确认卡。`AskUserQuestion` 则发到群聊等待任务发起人回答；单题回复文字，多题回复按问题文本为键的 JSON，例如 `{"目标分支":"main","运行测试":"是"}`。回答超时或轮次取消时，CodeBuddy Agent SDK 收到拒绝结果。
+`AskUserQuestion` 发到群聊等待任务发起人回答；单题回复文字，多题回复按问题文本为键的 JSON，例如 `{"目标分支":"main","运行测试":"是"}`。回答超时或轮次取消时，CodeBuddy Agent SDK 收到拒绝结果。
 
-用户、项目、本地设置中的 CodeBuddy 允许规则与钩子继续生效。已经允许的工具可能不触发 SDK 权限回调；`--full-auto` 选择 bypassPermissions 并跳过桥接确认。CodeBuddy 登录凭证保留在主机上，Nia 配对不替代 CodeBuddy 登录。
+用户、项目、本地设置中的 CodeBuddy 允许规则与钩子继续生效。免确认模式使用 `bypassPermissions`；`--require-approval` 使用 `default`。已经允许的工具可能不触发 SDK 权限回调。CodeBuddy 登录凭证保留在主机上，Nia 配对不替代 CodeBuddy 登录。
 
 ### 第 4 步：把外部 Agent 拉进群聊并验证在线状态
 
@@ -151,12 +151,12 @@ SDK 的 system、assistant 与 result 事件仅用于保存会话和同步活动
 ## 三、CLI 参数、环境变量与包导出
 
 ```text
-nia-workbuddy connect [--cwd <dir>] [--model <model-id>] [--no-start] [--group-link <url-or-token>]
+nia-workbuddy connect [--cwd <dir>] [--require-approval] [--model <model-id>] [--no-start] [--group-link <url-or-token>]
 nia-workbuddy pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-workbuddy status [--config-dir <dir>]
 nia-workbuddy stop [--config-dir <dir>]
 nia-workbuddy start [--cwd <dir>] [--config-dir <dir>] [--model <model-id>]
-                   [--full-auto] [--codebuddy-bin <path>]
+                   [--require-approval] [--codebuddy-bin <path>]
 nia-workbuddy --help
 ```
 
@@ -167,7 +167,9 @@ nia-workbuddy --help
 - `--model` / `CODEBUDDY_MODEL`：运行 `start` 或会自动启动守护进程的 `connect` 时，必须指定账号可用的具体模型 ID。`--model` 优先于环境变量 `CODEBUDDY_MODEL`；未传 `--model` 时使用环境变量。选定的值会去除首尾空白。Auto 路由（`auto`、`auto-chat`、`fast-model`、`balanced-model`、`deep-model`）可能导致长对话中的 MCP 工具调用反复执行。桥接程序不接受这些 ID，也不接受通用别名 `default-model` 和 `primary-model`。`pair`、`status`、`stop` 和 `connect --no-start` 无需指定模型。
 - `--help` / `-h`：显示命令概览；无命令时也显示帮助。
 - `--codebuddy-bin / CODEBUDDY_BIN`：指定 CodeBuddy 可执行文件或可读的 `.mjs` / `.js` 入口。Windows 上会自动查找 Program Files 和 Local AppData 中按默认路径安装的 WorkBuddy。
-- `--full-auto`：关闭桥接工具确认。
+- `--require-approval`：在群聊 TaskBar 中确认运行时发来的工具权限请求。
+
+兼容旧命令的 `--full-auto` 与默认行为相同，不能与 `--require-approval` 同用。
 
 ### 包导出与嵌入入口
 
@@ -185,9 +187,11 @@ nia-workbuddy --help
 
 ## 四、权限确认、群聊工具与安全边界
 
-![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
+### 1. 可选的 TaskBar 签名确认
 
-### 1. TaskBar 签名确认流程
+日常编程会触发多次工具调用，默认免确认可避免群聊出现过多确认卡。需要逐项确认时，在 `connect` 或 `start` 加上 `--require-approval`。
+
+![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
 
 1. CodeBuddy 请求工具权限时，桥接在 TaskBar 弹出权限确认卡，并保存当前轮次与请求参数。
 2. Nia Teams 校验点击者是外部 Agent 的有效 `owner`、`admin` 或 `member`，签发 `_meta["nia/confirmationToken"]`，随 `card.action` 送回主机。

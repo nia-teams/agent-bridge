@@ -17,7 +17,7 @@ Inspected npm `@anthropic-ai/claude-agent-sdk@0.3.319`; package metadata is reta
 - The SDK recognizes `.js` / `.mjs` entries. For Windows `.cmd` / `.bat` wrappers and `.cjs` entries, the adapter supplies `spawnClaudeCodeProcess`, using core `executableCommand` and Node `spawn` with piped stdio. Prompts stay on SDK stdin, not shell command lines.
 - `settingSources: ['user', 'project', 'local']` retains local settings. `systemPrompt: { type: 'preset', preset: 'claude_code', append: context.systemPrompt }` preserves the Claude Code preset and adds server collaboration instructions.
 - `strictMcpConfig: true` loads only the supplied scoped `nia` tool server. A low-level MCP `Server` serves every `ready.tools` entry with its raw JSON Schema. The SDK connects its `instance` through `.connect(transport)`. Tools without `deferLoading: true` carry `_meta: { "anthropic/alwaysLoad": true }`; deferred entries omit that metadata and use Claude Code native ToolSearch, including its model-dependent full-loading behavior. No custom search or meta-tool is registered. Calls delegate to `context.callTool` and the unified `tool.call` RPC; MCP text uses `result.content` verbatim and preserves `isError`.
-- `permissionMode` is `default`; `fullAuto` selects `bypassPermissions` and `allowDangerouslySkipPermissions: true`. Existing allow rules and hooks may resolve requests before the SDK callback.
+- Omitted `fullAuto` selects `bypassPermissions` and `allowDangerouslySkipPermissions: true`. `--require-approval` sets `fullAuto: false`, selecting `default` and `allowDangerouslySkipPermissions: false`. Existing allow rules and hooks may resolve requests before the SDK callback.
 
 ## Sessions, publications, and cancellation
 
@@ -29,11 +29,11 @@ Cancellation aborts the SDK query and pending permissions. The runner removes it
 
 ## Questions and signed TaskBar permissions
 
-`canUseTool(name, input, detail)` returns `{ behavior: 'allow', updatedInput }` or `{ behavior: 'deny', message }`. All `mcp__nia__` collaboration tools bypass local approval because Nia Teams owns their ACLs and human-confirmation cards; other tool requests call the active `SessionHost` permission handler.
+`canUseTool(name, input, detail)` returns `{ behavior: 'allow', updatedInput }` or `{ behavior: 'deny', message }`. All `mcp__nia__` collaboration tools bypass local approval because Nia Teams owns their ACLs and human-confirmation cards; human questions and opt-in tool requests call the active `SessionHost` permission handler.
 
 `AskUserQuestion` posts questions to GroupChat and waits for the invoking human. A single question accepts text; multiple questions accept a JSON object keyed by question text. Answers return in `updatedInput.answers`. Timeout or cancellation denies the request.
 
-Other tool requests open signed TaskBar cards using tool `claude_code.permission` and server `agent-bridge`. Core verifies RS256 using `${issuer}/oauth2/jwks`, issuer, audience `nia-teams-workload`, lifetime, service identity, and `human_confirmed: true`. It matches `context_server`, `context_tool`, canonical-JSON argument SHA-256 digest, and `confirmation_card_id` to the locally pending card and turn. Missing/invalid tokens, dismissal, expiry, and cancellation deny the request. Chat text is not approval. Nia Teams checks the clicker's active Agent membership (`owner`, `admin`, or `member`) before signing.
+In opt-in approval mode, tool requests open signed TaskBar cards using tool `claude_code.permission` and server `agent-bridge`. Core verifies RS256 using `${issuer}/oauth2/jwks`, issuer, audience `nia-teams-workload`, lifetime, service identity, and `human_confirmed: true`. It matches `context_server`, `context_tool`, canonical-JSON argument SHA-256 digest, and `confirmation_card_id` to the locally pending card and turn. Missing/invalid tokens, dismissal, expiry, and cancellation deny the request. Chat text is not approval. Nia Teams checks the clicker's active Agent membership (`owner`, `admin`, or `member`) before signing.
 
 ## GroupChat sender identity and mentions
 

@@ -10,10 +10,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     'group-link': { type: 'string' }, 'agent-name': { type: 'string' }, 'no-browser': { type: 'boolean' }, 'no-start': { type: 'boolean' },
     daemon: { type: 'boolean' }, 'log-file': { type: 'string' },
     'server-url': { type: 'string' }, 'config-dir': { type: 'string' }, name: { type: 'string' }, label: { type: 'string' }, 'timeout-ms': { type: 'string' },
-    cwd: { type: 'string' }, model: { type: 'string' }, mode: { type: 'string' }, sandbox: { type: 'boolean' }, 'full-auto': { type: 'boolean' },
+    cwd: { type: 'string' }, model: { type: 'string' }, mode: { type: 'string' }, sandbox: { type: 'boolean' }, 'require-approval': { type: 'boolean' }, 'full-auto': { type: 'boolean' },
     'bypass-approvals': { type: 'boolean' }, 'agy-bin': { type: 'string' }, help: { type: 'boolean', short: 'h' },
   } });
-  if (values.help || !positionals.length) { console.log('nia-agy connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--daemon] [--log-file <path>]\nnia-agy pair [--server-url <origin>] [--config-dir <dir>] [--name <label>] [--label <label>] [--timeout-ms <ms>]\nnia-agy status [--config-dir <dir>]\nnia-agy start [--daemon] [--log-file <path>] [--cwd <dir>] [--config-dir <dir>] [--model <model>] [--mode default|accept-edits|auto|plan] [--sandbox] [--full-auto] [--bypass-approvals] [--agy-bin <path>]'); return; }
+  if (values['require-approval'] && (values['full-auto'] || values['bypass-approvals'])) throw new Error('--require-approval cannot be combined with --full-auto or --bypass-approvals');
+  const fullAuto = !values['require-approval'];
+  if (values.help || !positionals.length) { console.log('nia-agy connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--require-approval] [--daemon] [--log-file <path>]\nnia-agy pair [--server-url <origin>] [--config-dir <dir>] [--name <label>] [--label <label>] [--timeout-ms <ms>]\nnia-agy status [--config-dir <dir>]\nnia-agy start [--daemon] [--log-file <path>] [--cwd <dir>] [--config-dir <dir>] [--model <model>] [--mode default|accept-edits|auto|plan] [--sandbox] [--require-approval] [--agy-bin <path>]\nFull-auto is the default; --full-auto and --bypass-approvals are accepted for compatibility.'); return; }
   if (positionals.length !== 1) throw new Error('Expected one command');
   const configDir = resolve(values['config-dir'] ?? defaultConfigDir('nia-teams-agy', 'NIA_AGY_CONFIG_DIR'));
   if (positionals[0] === 'connect') {
@@ -36,7 +38,6 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (positionals[0] !== 'start') throw new Error('Unknown command: use pair, status, or start');
   if (await maybeRespawnDaemon(args, resolve(configDir, 'daemon.log'))) return;
   const cwd = resolve(values.cwd ?? process.cwd());
-  const fullAuto = values['full-auto'] || values['bypass-approvals'];
   const runner = createAgyRunner({ cwd, agyBin: values['agy-bin'], model: values.model, mode: values.mode as AgyMode | undefined, sandbox: values.sandbox, fullAuto });
   try { await resolveAgyBinary(values['agy-bin']); await runSessionDaemon(runner, { ...clientBranding, configDir, cwd, runtime: 'Antigravity', approvalTool: 'agy.approval', fullAuto }); }
   finally { await runner.close(); }

@@ -16,11 +16,11 @@ For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat co
 
 ## 1. Product Overview & Collaboration Model
 
-The package runs tasks through Factory’s native TypeScript SDK using either an existing `droid` CLI login or `FACTORY_API_KEY`. Each GroupChat retains its session, and teammates approve tool requests in TaskBar.
+The package runs tasks through Factory’s native TypeScript SDK using either an existing `droid` CLI login or `FACTORY_API_KEY`. Each GroupChat retains its session.
 
 - **Create and bind without precreating an Agent**: Start pairing on the Factory Droid host, sign in to Nia Teams from a browser on any device, create the external Agent, and bind the host public key. The private key stays on the host.
 - **Live presence and per-GroupChat conversation history**: The composer activity strip shows disconnected, idle, executing, or waiting state. Each chat retains its own Droid session for later turns; the host workspace is shared.
-- **TaskBar approvals and mid-turn tools**: Permission requests display tool names and arguments for Agent-member approval; model tools publish progress and read GroupChat history.
+- **Follow-up questions**: The Agent can ask the person who started the task for input in GroupChat.
 
 ![Nia Teams GroupChat and Agent activity](./docs/assets/group-chat-overview.png)
 
@@ -29,7 +29,7 @@ The package runs tasks through Factory’s native TypeScript SDK using either an
 | Agent runtime | Models, tools, workspace, Droid sign-in | Chat-to-runtime sessions, queries, cancellation | External Agent identity and scope |
 | Connection and auth | Local Node process and Factory Droid CLI | Ed25519 credentials, WebSocket, reconnection | Browser pairing, challenge/lease, delivery |
 | Conversation | Inference turns and local tasks | Prompt formatting, session resume, publication | Timeline, members, activity |
-| Approval and safety | Droid tool permissions and execution scope | Display tool permission requests as TaskBar cards, verify RS256, match pending actions | TaskBar, Agent membership, signed approvals |
+| Approval and safety | Droid tool permissions and execution scope | Full-auto by default; signed TaskBar cards in opt-in mode | TaskBar, Agent membership, signed approvals |
 
 ## 2. Five-Step Quick Start
 
@@ -109,7 +109,7 @@ GroupChats have separate model contexts but share the files, repository, and loc
 
 The native `@factory/droid-sdk` uses a fresh process per turn and resumes the persisted session for each GroupChat. A missing local session creates a new session before prompting; failed prompts are not replayed. Only `send_message` publishes to chat; assistant output remains private.
 
-Droid's permission requests appear as signed TaskBar cards. AskUser questions wait for the invoking human's GroupChat answer. Droid autonomy determines which operations request permission; omitted autonomy keeps Droid's default (medium in the tested CLI). Use `--autonomy off` for Droid's least autonomous mode. `--full-auto` sets high autonomy and approves Droid runtime permission requests locally without sending TaskBar confirmation cards; it does not bypass AskUser questions. Local Droid policy still applies.
+Full-auto uses `high` autonomy when `--autonomy` is omitted. An explicit `--autonomy` takes precedence. Local Droid policy still applies, and AskUser questions still wait for the invoking human’s GroupChat answer.
 
 ### Step 4: Invite the external Agent and verify presence
 
@@ -141,11 +141,11 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 
 ```text
 nia-droid connect [--group-link <url-or-token>] [--agent-name <name>]
-                  [--no-browser] [--no-start] [start options]
+                  [--no-browser] [--no-start] [--require-approval] [start options]
 nia-droid pair [--name <label>] [--server-url <url>] [--config-dir <dir>]
 nia-droid status [--config-dir <dir>]
 nia-droid start [--cwd <dir>] [--model <model>] [--effort <level>]
-                [--autonomy <off|low|medium|high>] [--full-auto]
+                [--autonomy <off|low|medium|high>] [--require-approval]
                 [--droid-bin <path>] [--daemon] [--log-file <path>]
                 [--config-dir <dir>]
 ```
@@ -158,19 +158,29 @@ nia-droid start [--cwd <dir>] [--model <model>] [--effort <level>]
 - `--daemon`: detached host; logs default to `<config-dir>/daemon.log`, overridden by `--log-file`.
 - `--help` / `-h`: command summary.
 
+- `--require-approval`: Review tool permission requests from the runtime in TaskBar.
+
+For compatibility, `--full-auto` matches the default and cannot be combined with `--require-approval`.
+
 The package root exports `createDroidRunner(options: DroidOptions): TurnRunner`, `resolveDroidBinary(explicit?: string): Promise<string>`, `validateDroidOptions(options: DroidOptions): void`, and core `SessionHost`. `DroidOptions` contains `cwd`, optional `model`, `effort`, `autonomy`, `fullAuto`, and `droidBin`. Signatures are in `dist/**/*.d.ts`; the only public subpath is `.`. Supply the runner to core `runSessionDaemon` or a `SessionHost` owned by your application.
 
 ## 4. Collaboration and safety boundaries
 
+### Opt-in signed TaskBar approvals
+
+Full-auto is the default because per-tool approvals would add too many cards to GroupChat during normal coding turns. For per-tool confirmation, pass `--require-approval` to `connect` or `start`.
+
 ![TaskBar approval](./docs/assets/taskbar-approval.png)
+
+Core verifies TaskBar RS256 signatures against the saved card, tool, and arguments; unsigned chat text cannot approve work. Factory login and Nia Teams pairing are independent. Credentials stay in the private configuration directory. Per-chat sessions share the workspace and are not OS isolation.
+
+### GroupChat tools and questions
 
 Nia Teams supplies the available collaboration tools, including chat management, reminders, and shared links. The runtime exposes them through its native tool interface.
 
 `send_message({ content })` publishes to the active GroupChat; `chat_history({ limit?, offset? })` reads history. Tool schemas and defaults come from Nia Teams. Collaboration tools are scoped to the current turn; Nia Teams manages their permissions.
 
 AskUser publishes the question text and option labels to GroupChat. For one question, reply with an option label or custom free text. For multiple questions, reply with JSON keyed by the exact question text, for example `{"Choose a color":"Blue","Describe the task":"Review the patch"}`. Option labels are suggestions, not enforced choices. The bridge returns each answer as a string with the original question index and text: `{ answers: [{ index, question, answer }] }`. A cancelled or denied question returns `{ cancelled: true, answers: [] }`.
-
-Core verifies TaskBar RS256 signatures against the saved card, tool, and arguments; unsigned chat text cannot approve work. Factory login and Nia Teams pairing are independent. Credentials stay in the private configuration directory. Per-chat sessions share the workspace and are not OS isolation.
 
 Use received sender/member IDs for native mentions: `<mention userId="<userId>" />`. Incoming formatted messages expose sender IDs; raw frames use `messages[].authorId`, while structured channels may use `senderId`.
 

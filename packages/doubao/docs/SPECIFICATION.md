@@ -8,8 +8,8 @@ The runtime has no custom tool injection. New conversations prepend `ready.syste
 
 - `src/headless.mjs:350–395`: local create/send WITHOUT --wait is supported, but starts an upstream detached submission/runtime worker. Thus --wait is not strictly required by 0.23.3; it IS chosen by this bridge to keep one owned, foreground local executor for the entire turn and avoid detached task ownership.
 - `src/headless.mjs:435–454, 502–517`, `src/headless-turn.mjs:3–19`: with --wait, local tool-channel startup races with server-turn observation; worker remains connected and closes the engine in finally. `options.onAccepted` is called at acceptance, before final result. This gives cancellation IDs without split submit/wait or orphaning the runtime.
-- `src/headless.mjs:219–229`: executeHeadless accepts programmatic confirmFullAccess / fullAccessConfirmed. CLI --yes does NOT grant this consent. The bridge supplies confirmFullAccess only from explicit trusted --full-auto for that invocation; no global environment consent or automatic TTY answers are used.
-- `src/headless-approval.mjs:108–145`: ordinary approval defaults to false without an interactive stdin/stderr TTY. `src/headless-local-runtime.mjs:156–173, 1040–1067`: AskOnRisk allows ordinary in-workspace reads but commands/writes/connector/outside-workspace access require approval; FullAccess has no per-tool risk prompt. Workspace writes independently require approval unless FullAccess (`:990–1000`). The unattended bridge defaults AskOnRisk and denies restricted tools; it does not invent a TaskBar approval callback.
+- `src/headless.mjs:219–229`: executeHeadless accepts programmatic confirmFullAccess / fullAccessConfirmed. CLI --yes does NOT grant this consent. The bridge supplies confirmFullAccess only from the invocation’s resolved `fullAuto`; no global environment consent or automatic TTY answers are used.
+- `src/headless-approval.mjs:108–145`: ordinary approval defaults to false without an interactive stdin/stderr TTY. `src/headless-local-runtime.mjs:156–173, 1040–1067`: AskOnRisk allows ordinary in-workspace reads but commands/writes/connector/outside-workspace access require approval; FullAccess has no per-tool risk prompt. Workspace writes independently require approval unless FullAccess (`:990–1000`). `--require-approval` selects AskOnRisk; unattended turns deny restricted tools because Doubao provides no TaskBar approval callback.
 - `src/options-contract.mjs:25` and `src/headless.mjs:350–371`: --mode is create-only. Create defaults work and local runtime cannot use chat; sends infer prior conversation mode. Both desktop variants use --mode work on create, none on send. Goal is an optional account-gated feature and not a synonym for Doubao.app.
 - `src/headless-local-runtime.mjs:1090+`: portable local file/text and shell operations execute in workspace. Not every native desktop capability is portable; media/PDF Read is explicitly unsupported.
 - `src/app.mjs:37–48`, `src/turns.mjs:309–327`: executeHeadless must run inside withApp(resolvePlatform('headless'), ...), otherwise currentApp/receipt scope defaults to a desktop identity and stop will not share its receipt scope. The per-turn bridge worker pins the proper context.
@@ -31,14 +31,14 @@ One foreground child imports the real driver's parser and executeHeadless, selec
 
 ```text
 --platform headless --json sessions create --mode work
-  --runtime local --workspace <absolute cwd> --permission AskOnRisk
+  --runtime local --workspace <absolute cwd> --permission FullAccess
   [--model <name>] --wait --timeout 86400 -- <prompt>
 --platform headless --json sessions send <rawConversationId>
-  --runtime local --workspace <absolute cwd> --permission AskOnRisk
+  --runtime local --workspace <absolute cwd> --permission FullAccess
   [--model <name>] --wait --timeout 86400 -- <prompt>
 ```
 
---full-auto uses FullAccess with confirmFullAccess returning true in that invocation. Cloud omits local workspace/permission. The literal -- prevents prompt option injection. No goal mode is automatically selected. The worker never calls main/login/updater; no DOM/webpack task API, sandbox module lookup, model menu or desktop native runtime device identity is needed. HTTP runtime uses its own routing device metadata; receipt handling and stop retain that identity through upstream's receipt store.
+Omitted `fullAuto` uses `FullAccess` with `confirmFullAccess` returning true in that invocation. `--require-approval` sets `fullAuto: false` and selects `AskOnRisk`. Cloud omits local workspace/permission. The literal -- prevents prompt option injection. No goal mode is automatically selected. The worker never calls main/login/updater; no DOM/webpack task API, sandbox module lookup, model menu or desktop native runtime device identity is needed. HTTP runtime uses its own routing device metadata; receipt handling and stop retain that identity through upstream's receipt store.
 
 Worker onAccepted emits only public conversationId/runId/status. Parent persists the backend namespace early, suppressing persistence after cancellation. Final publication requires matching accepted IDs, status completed and nonempty bounded reply.text. Worker result/error serialization drops upstream error messages, causes, headers, request bodies and recovery details; only whitelisted receipt/status/reply fields cross IPC. Neither stdout nor stderr of the worker is forwarded.
 
@@ -46,11 +46,11 @@ On abort with known IDs, parent independently calls `node <bundled-driver> --pla
 
 Namespaces remain work:<id>, doubao:<id>, cli:<id>, headless:<id>. Match only the active backend prefix; foreign/legacy values create fresh conversations. Desktop-auth HTTP execution retains work/doubao prefixes. Shared core owns per-chat persistence and publication semantics.
 
-## Official native CLI (unchanged)
+## Official native CLI
 
 Native runtime discovery prefers OS app-data runtime then PATH, excludes bundled CDP wrapper and resolves executable symlinks. --doubao-bin is official CLI-only. Ready checks auth status --verify before Nia connects. If unauthenticated, only interactive local stdin/stdout TTY (or explicit API override) may spawn login with inherited stdio; post-login re-verification is mandatory. Non-TTY/failed login fails closed. QR never travels through GroupChat.
 
-Turns use -C <cwd> --permission-mode ask_always|always_allow [--model] [--resume rawId] -p <prompt>. stdout reply, stderr session marker, local process-group cancellation; no imaginary JSON/MCP approval transport or claim that remote native tasks are guaranteed stopped. Native session ownership is separate from desktop/HTTP cookies.
+Turns use `-C <cwd> --permission-mode always_allow|ask_always [--model] [--resume rawId] -p <prompt>`. The default is `always_allow`; `--require-approval` selects `ask_always`. stdout reply, stderr session marker, local process-group cancellation; no imaginary JSON/MCP approval transport or claim that remote native tasks are guaranteed stopped. Native session ownership is separate from desktop/HTTP cookies.
 
 ## Verification boundaries
 

@@ -9,10 +9,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     'group-link': { type: 'string' }, 'agent-name': { type: 'string' }, 'no-browser': { type: 'boolean' }, 'no-start': { type: 'boolean' },
     daemon: { type: 'boolean' }, 'log-file': { type: 'string' },
-    'server-url': { type: 'string' }, 'config-dir': { type: 'string' }, name: { type: 'string' }, label: { type: 'string' }, cwd: { type: 'string' }, model: { type: 'string' }, sandbox: { type: 'string' }, 'full-auto': { type: 'boolean' }, 'bypass-approvals': { type: 'boolean' }, 'codex-bin': { type: 'string' }, help: { type: 'boolean', short: 'h' },
+    'server-url': { type: 'string' }, 'config-dir': { type: 'string' }, name: { type: 'string' }, label: { type: 'string' }, cwd: { type: 'string' }, model: { type: 'string' }, sandbox: { type: 'string' }, 'require-approval': { type: 'boolean' }, 'full-auto': { type: 'boolean' }, 'bypass-approvals': { type: 'boolean' }, 'codex-bin': { type: 'string' }, help: { type: 'boolean', short: 'h' },
   } });
+  if (values['require-approval'] && (values['full-auto'] || values['bypass-approvals'])) throw new Error('--require-approval cannot be combined with --full-auto or --bypass-approvals');
+  const fullAuto = !values['require-approval'];
   if (values.help || positionals.length === 0) {
-    console.log('nia-codex connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--daemon] [--log-file <path>]\nnia-codex pair [--server-url <url>] [--config-dir <dir>] [--name <label>]\nnia-codex start [--daemon] [--log-file <path>] [--config-dir <dir>] [--cwd <dir>] [--model <model>] [--sandbox <read-only|workspace-write|danger-full-access>] [--full-auto] [--codex-bin <path>]\nnia-codex status [--config-dir <dir>]'); return;
+    console.log('nia-codex connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--require-approval] [--daemon] [--log-file <path>]\nnia-codex pair [--server-url <url>] [--config-dir <dir>] [--name <label>]\nnia-codex start [--daemon] [--log-file <path>] [--config-dir <dir>] [--cwd <dir>] [--model <model>] [--sandbox <read-only|workspace-write|danger-full-access>] [--require-approval] [--codex-bin <path>]\nnia-codex status [--config-dir <dir>]\nFull-auto is the default; --full-auto and --bypass-approvals are accepted for compatibility.'); return;
   }
   if (positionals.length !== 1) throw new Error('Expected one command');
   const configDir = resolve(values['config-dir'] ?? defaultConfigDir('nia-teams-codex', 'NIA_CODEX_CONFIG_DIR'));
@@ -39,7 +41,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (await maybeRespawnDaemon(args, resolve(configDir, 'daemon.log'))) return;
   if (values.sandbox && !['read-only', 'workspace-write', 'danger-full-access'].includes(values.sandbox)) throw new Error('Invalid sandbox mode');
   const bridge = new BridgeClient(await loadCredentials(configDir), { ...clientBranding, onError: error => console.error(error.message) });
-  const host = new CodexHost(bridge, { configDir, cwd: resolve(values.cwd ?? process.cwd()), model: values.model, sandbox: values.sandbox as 'read-only' | 'workspace-write' | 'danger-full-access' | undefined, fullAuto: values['full-auto'] || values['bypass-approvals'], codexBin: values['codex-bin'], onError: error => console.error(error.message) });
+  const host = new CodexHost(bridge, { configDir, cwd: resolve(values.cwd ?? process.cwd()), model: values.model, sandbox: values.sandbox as 'read-only' | 'workspace-write' | 'danger-full-access' | undefined, fullAuto, codexBin: values['codex-bin'], onError: error => console.error(error.message) });
   const stop = async () => { bridge.close(); await host.close(); };
   process.once('SIGINT', () => { void stop(); }); process.once('SIGTERM', () => { void stop(); });
   try { await host.start(); await bridge.start(); }

@@ -18,11 +18,11 @@ For terminal QR setup with WeChat and optional GroupChat invites, see [WeChat co
 
 ## 1. Product Overview & Collaboration Model
 
-The package runs tasks through the CodeBuddy Agent SDK using local desktop or CLI authentication. Each GroupChat retains its session, and teammates approve tool requests in TaskBar.
+The package runs tasks through the CodeBuddy Agent SDK using local desktop or CLI authentication. Each GroupChat retains its session.
 
 - **Create and bind in one flow, without precreating an Agent or distributing static keys**: Start pairing on the WorkBuddy / CodeBuddy host, sign in to Nia Teams from a browser on any device, create the external Agent, and bind the host public key. The private key stays on the host.
 - **Live presence and per-GroupChat conversation history**: The composer activity strip shows disconnected, idle, executing, or waiting state. Each chat retains its own CodeBuddy session for later turns; the host workspace is shared.
-- **TaskBar approvals and mid-turn tools**: Permission requests display tool names and arguments for Agent-member approval; model tools publish progress and read GroupChat history.
+- **Follow-up questions**: The Agent can ask the person who started the task for input in GroupChat.
 
 ![Nia Teams GroupChat and Agent activity](./docs/assets/group-chat-overview.png)
 
@@ -31,7 +31,7 @@ The package runs tasks through the CodeBuddy Agent SDK using local desktop or CL
 | Agent runtime | Models, tools, workspace, CodeBuddy sign-in | Chat-to-runtime sessions, queries, cancellation | External Agent identity and scope |
 | Connection and auth | Local Node process and WorkBuddy desktop app or CodeBuddy CLI | Ed25519 credentials, WebSocket, reconnection | Browser pairing, challenge/lease, delivery |
 | Conversation | Inference turns and local tasks | Prompt formatting, session resume, publication | Timeline, members, activity |
-| Approval and safety | CodeBuddy tool permissions and execution scope | Display tool permission requests as TaskBar cards, verify RS256, match pending actions | TaskBar, Agent membership, signed approvals |
+| Approval and safety | CodeBuddy tool permissions and execution scope | Full-auto by default; signed TaskBar cards in opt-in mode | TaskBar, Agent membership, signed approvals |
 
 ## 2. Five-Step Quick Start
 
@@ -117,9 +117,9 @@ Private `threads.json` stores each GroupChat’s CodeBuddy session ID and worksp
 
 SDK system, assistant, and result events drive session persistence and activity only. Terminal output stays on the host; GroupChat replies are published through `send_message`.
 
-Tool requests delivered to `canUseTool` become TaskBar cards. `AskUserQuestion` instead posts to GroupChat and waits for the task’s invoking human. Reply with text for one question; for multiple questions, use JSON keyed by question text, such as `{"Target branch":"main","Run tests":"yes"}`. Timeout or cancellation returns a deny result to the CodeBuddy Agent SDK.
+`AskUserQuestion` posts to GroupChat and waits for the task’s invoking human. Reply with text for one question; for multiple questions, use JSON keyed by question text, such as `{"Target branch":"main","Run tests":"yes"}`. Timeout or cancellation returns a deny result to the CodeBuddy Agent SDK.
 
-CodeBuddy allow rules and hooks from user, project, and local settings remain effective. Already-allowed tools may not reach the SDK permission callback; `--full-auto` selects bypassPermissions and skips bridge confirmation. CodeBuddy authentication belongs to the model host; Nia pairing does not replace CodeBuddy login.
+CodeBuddy allow rules and hooks from user, project, and local settings remain effective. Full-auto selects `bypassPermissions`; `--require-approval` selects `default`. Already-allowed tools may not reach the SDK permission callback. CodeBuddy authentication belongs to the model host; Nia pairing does not replace CodeBuddy login.
 
 ### Step 4: Invite the external Agent and verify presence
 
@@ -151,12 +151,12 @@ Type `@` in the composer and select the external Agent. Its activity becomes exe
 ## 3. CLI, Environment & Package Exports
 
 ```text
-nia-workbuddy connect [--cwd <dir>] [--model <model-id>] [--no-start] [--group-link <url-or-token>]
+nia-workbuddy connect [--cwd <dir>] [--require-approval] [--model <model-id>] [--no-start] [--group-link <url-or-token>]
 nia-workbuddy pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-workbuddy status [--config-dir <dir>]
 nia-workbuddy stop [--config-dir <dir>]
 nia-workbuddy start [--cwd <dir>] [--config-dir <dir>] [--model <model-id>]
-                   [--full-auto] [--codebuddy-bin <path>]
+                   [--require-approval] [--codebuddy-bin <path>]
 nia-workbuddy --help
 ```
 
@@ -167,7 +167,9 @@ nia-workbuddy --help
 - `--model` / `CODEBUDDY_MODEL`: Starting the daemon, including via `connect`, requires a concrete model ID available to your account. `--model` takes precedence over `CODEBUDDY_MODEL`; surrounding whitespace is trimmed. Auto routing (`auto`, `auto-chat`, `fast-model`, `balanced-model`, `deep-model`) can lead to repeated MCP tool calls in long conversations. The bridge rejects those IDs as well as the generic aliases `default-model` and `primary-model`. `connect --no-start`, `pair`, `status`, and `stop` do not require a model.
 - `--help` / `-h`: Show command overview; no command also displays help.
 - `--codebuddy-bin / CODEBUDDY_BIN`: Select a CodeBuddy executable or readable `.mjs` / `.js` entry. On Windows, standard WorkBuddy installations under Program Files and Local AppData are detected automatically.
-- `--full-auto`: Disable bridge tool confirmations.
+- `--require-approval`: Review tool permission requests from the runtime in TaskBar.
+
+For compatibility, `--full-auto` matches the default and cannot be combined with `--require-approval`.
 
 ### Exports and embedding
 
@@ -185,9 +187,11 @@ For embedding, pass `createWorkBuddyRunner(options)` to core `runSessionDaemon`,
 
 ## 4. Approvals, GroupChat Tools & Security Boundaries
 
-![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
+### 1. Opt-in signed TaskBar approvals
 
-### 1. Signed TaskBar approval flow
+Full-auto is the default because per-tool approvals would add too many cards to GroupChat during normal coding turns. For per-tool confirmation, pass `--require-approval` to `connect` or `start`.
+
+![Nia Teams TaskBar 工具权限卡](./docs/assets/taskbar-approval.png)
 
 1. A CodeBuddy tool permission request opens a TaskBar confirmation card bound to the current turn and request arguments.
 2. Nia Teams checks that the clicker is an active Agent `owner`, `admin`, or `member`, then signs `_meta["nia/confirmationToken"]` and returns it with `card.action`.

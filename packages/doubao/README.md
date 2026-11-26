@@ -120,7 +120,7 @@ GroupChats have separate model contexts but share the files, repository, and loc
 
 Desktop mode defaults to `--runtime local` and passes absolute `--cwd` as the local workspace. Both desktop apps create work-mode conversations; later messages inherit the existing mode. `--runtime cloud` does not mount the local project; local cwd is then only the process directory.
 
-Local permissions default to `AskOnRisk`: ordinary workspace reads may run, while commands, writes, and outside-workspace access require Doubao approval. Unattended HTTP execution denies those requests without interactive consent. Explicit `--full-auto` supplies the Doubao callback granting `FullAccess` for that invocation, allowing local shell and file operations. It is not an OS sandbox and does not create TaskBar approval cards.
+Full-auto is the default: the official CLI uses `always_allow`, and the local HTTP runtime uses `FullAccess` for local shell and file operations. With `--require-approval`, unattended tasks deny operations that need interactive consent. Doubao does not issue TaskBar tool approval cards; neither mode provides OS isolation.
 
 `threads.json` stores backend-prefixed IDs: `work:<conversationId>`, `doubao:<conversationId>`, `cli:<sessionId>`, and `headless:<conversationId>`. Only matching backend IDs resume. Switching backend starts a new conversation while retaining Nia pairing. Desktop cookies refresh before each turn; stopping a run uses the same cookie snapshot captured for that turn.
 
@@ -161,7 +161,7 @@ nia-doubao pair [--server-url <origin>] [--config-dir <dir>] [--name <label>]
 nia-doubao status [--config-dir <dir>]
 nia-doubao start [--cwd <dir>] [--config-dir <dir>] [--model <model>]
                 [--platform auto|work|doubao|cli|headless]
-                [--runtime local|cloud] [--full-auto] [--restart-app]
+                [--runtime local|cloud] [--require-approval] [--restart-app]
                 [--doubao-bin <official-binary>]
 nia-doubao --help
 ```
@@ -176,7 +176,9 @@ nia-doubao --help
 - `--runtime`: `local` or `cloud` for desktop/HTTP mode; desktop defaults to `local`.
 - `--doubao-bin`: Official CLI path; an explicit binary makes auto select cli.
 - `--restart-app`: Authorize startup restart of a desktop app without CDP.
-- `--full-auto`: Use FullAccess for HTTP local tasks and always_allow for the official CLI.
+- `--require-approval`: Select `ask_always` for the official CLI or `AskOnRisk` for the local HTTP runtime.
+
+For compatibility, `--full-auto` matches the default and cannot be combined with `--require-approval`.
 - `DOUBAO_CDP_ENDPOINT`: Override desktop CDP with a loopback HTTP origin belonging to the selected app.
 
 ### Exports and embedding
@@ -196,27 +198,15 @@ For embedding, create `createDoubaoRunner(options)`, await `runner.ready()` for 
 
 ## 4. Approvals, GroupChat Tools & Security Boundaries
 
-![Nia Teams TaskBar (tool approvals for Codex, Claude Code, WorkBuddy, DSH, and Antigravity)](./docs/assets/taskbar-approval.png)
-
-### 1. Doubao permissions and the TaskBar protocol
-
-The local HTTP runtime uses `AskOnRisk` / `FullAccess` or official CLI `ask_always` / `always_allow` modes. This adapter does not provide a Doubao tool-to-TaskBar approval callback. The image shows Nia Teams approval UI used by adapters with TaskBar permission confirmation. The shared Agent Bridge signature contract below does not replace Doubao authorization with chat text or UI appearance.
-
-1. A consumer creating an approval card stores the binding between card and request.
-2. Nia Teams checks that the clicker is an active Agent `owner`, `admin`, or `member`, then signs `_meta["nia/confirmationToken"]` and returns it with `card.action`.
-3. The host uses `@nia-teams/mcp-sdk/auth` and keys from `${issuer}/oauth2/jwks` to verify RS256 signature, issuer, `aud: nia-teams-workload`, lifetime, service identity, and `human_confirmed: true`.
-4. It checks `context_server: agent-bridge`, the expected tool name, canonical-JSON argument SHA-256 digest, and `confirmation_card_id === cardId`. Expected values come from the locally stored request, not chat text.
-5. Only a consumer with the corresponding runtime approval callback can apply that verdict to a tool request.
-
-### 2. GroupChat tools, messages, and native mentions
+### 1. GroupChat tools, messages, and native mentions
 
 The desktop HTTP runtime and official CLI publish the completed reply when the turn finishes. Doubao does not expose custom GroupChat tools; intermediate output stays on the host.
 
 Incoming prompts list `Members: Alice (<userId>), ...`; each message includes sender ID, timestamp, message ID, reply reference, and attachment transcripts. Generic headers may appear as `[chat:<chatId>] Alice (<userId>): ...`, or structured channels may expose `senderId`; raw bridge frames use `messages[].authorId`. Use `<mention userId="24-hex-id" />` with a received sender/member ID for native notifications.
 
-### 3. Roles and local execution boundaries
+### 2. Roles and local execution boundaries
 
-- Chat members may invoke an Agent; rebinding/unpairing requires its `owner` / `admin`, and archiving follows the sole-owner rule. Card approval additionally requires active Agent membership.
+- Chat members may invoke an Agent; rebinding/unpairing requires its `owner` / `admin`, and archiving follows the sole-owner rule.
 - Human membership is distinct from workload `sub`, `org:*`, and `role:*` claims. Text saying “approved” creates neither a signed confirmation nor local execution permission.
 - Ed25519 private keys stay in the config directory. Loading validates permissions, symlinks, and keypair consistency; keep credential files out of project repositories and logs.
 - Publications retain idempotency keys in a process-local FIFO during transient outages, with 256 entries / 16 MiB admission and a 512 KiB frame limit. Process exit does not persist unsent queue entries.

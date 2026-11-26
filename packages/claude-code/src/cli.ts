@@ -11,10 +11,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     'group-link': { type: 'string' }, 'agent-name': { type: 'string' }, 'no-browser': { type: 'boolean' }, 'no-start': { type: 'boolean' },
     daemon: { type: 'boolean' }, 'log-file': { type: 'string' },
-    cwd: { type: 'string' }, model: { type: 'string' }, 'full-auto': { type: 'boolean' }, 'claude-bin': { type: 'string' }, name: { type: 'string' }, server: { type: 'string' }, 'server-url': { type: 'string' }, 'config-dir': { type: 'string' }, label: { type: 'string' }, 'timeout-ms': { type: 'string' }, help: { type: 'boolean', short: 'h' },
+    cwd: { type: 'string' }, model: { type: 'string' }, 'require-approval': { type: 'boolean' }, 'full-auto': { type: 'boolean' }, 'claude-bin': { type: 'string' }, name: { type: 'string' }, server: { type: 'string' }, 'server-url': { type: 'string' }, 'config-dir': { type: 'string' }, label: { type: 'string' }, 'timeout-ms': { type: 'string' }, help: { type: 'boolean', short: 'h' },
   } });
+  if (values['require-approval'] && values['full-auto']) throw new Error('--require-approval cannot be combined with --full-auto');
+  const fullAuto = !values['require-approval'];
   if (values.help || positionals.length === 0) {
-    console.log('nia-claude connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--daemon] [--log-file <path>]\nnia-claude pair [--server-url <url>] [--config-dir <dir>] [--name <label>] [--timeout-ms <ms>]\nnia-claude start [--daemon] [--log-file <path>] [--config-dir <dir>] [--cwd <dir>] [--model <model>] [--full-auto] [--claude-bin <path>]\nnia-claude status [--config-dir <dir>]');
+    console.log('nia-claude connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--require-approval] [--daemon] [--log-file <path>]\nnia-claude pair [--server-url <url>] [--config-dir <dir>] [--name <label>] [--timeout-ms <ms>]\nnia-claude start [--daemon] [--log-file <path>] [--config-dir <dir>] [--cwd <dir>] [--model <model>] [--require-approval] [--claude-bin <path>]\nnia-claude status [--config-dir <dir>]\nFull-auto is the default; --full-auto is accepted for compatibility.');
     return;
   }
   if (positionals.length !== 1) throw new Error('Expected one command: connect, pair, status, or start');
@@ -38,8 +40,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     const { createClaudeRunner, resolveClaudeBinary } = await import('./runner.js');
     await resolveClaudeBinary(values['claude-bin']);
     const cwd = resolve(values.cwd ?? process.cwd());
-    await runSessionDaemon(createClaudeRunner({ cwd, model: values.model, fullAuto: values['full-auto'], claudeBin: values['claude-bin'] }), {
-      ...clientBranding, configDir: resolve(values['config-dir'] ?? defaultConfigDir()), cwd, runtime: 'Claude Code', approvalTool: 'claude_code.permission', fullAuto: values['full-auto'],
+    await runSessionDaemon(createClaudeRunner({ cwd, model: values.model, fullAuto, claudeBin: values['claude-bin'] }), {
+      ...clientBranding, configDir: resolve(values['config-dir'] ?? defaultConfigDir()), cwd, runtime: 'Claude Code', approvalTool: 'claude_code.permission', fullAuto,
     });
   } else if (positionals[0] === 'status') {
     const credentials = await loadCredentials(values['config-dir']);

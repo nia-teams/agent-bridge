@@ -86,13 +86,13 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 
 | 适配器 | 上游执行接口 | 群聊上下文 | 工具权限 |
 | --- | --- | --- | --- |
-| Codex | `codex app-server` JSON-RPC | 持久化的 Codex thread | 命令/文件请求映射 TaskBar |
-| Claude Code 后台 | Claude Agent SDK `query()` | 每群独立 SDK 会话 | 将 SDK 工具权限请求显示为 TaskBar 确认卡 |
-| WorkBuddy / CodeBuddy | CodeBuddy Agent SDK | 每群独立 SDK 会话 | 将 SDK 工具权限请求显示为 TaskBar 确认卡 |
-| 豆包 | 桌面 Cookie + HTTP Runtime 或官方 CLI | 后端前缀隔离的持久会话 | HTTP Runtime 的 AskOnRisk / FullAccess 或 CLI 权限模式 |
+| Codex | `codex app-server` JSON-RPC | 持久化的 Codex thread | 默认免确认；可选 TaskBar 确认 |
+| Claude Code 后台 | Claude Agent SDK `query()` | 每群独立 SDK 会话 | 默认免确认；可选 TaskBar 确认 |
+| WorkBuddy / CodeBuddy | CodeBuddy Agent SDK | 每群独立 SDK 会话 | 默认免确认；可选 TaskBar 确认 |
+| 豆包 | 桌面 Cookie + HTTP Runtime 或官方 CLI | 后端前缀隔离的持久会话 | 默认免确认；使用豆包权限模式 |
 | DSH | DeepSeek Harness / Cordis 服务 | 每群独立 Harness 会话 | 工具审批与审批提问映射 TaskBar |
-| Antigravity | `agy acp` JSON-RPC 2.0 | 每群独立持久 ACP 会话 | `session/request_permission` 映射 TaskBar |
-| Factory Droid | Factory TypeScript SDK | 每群独立 SDK 会话 | 运行时权限请求显示为 TaskBar 卡片 |
+| Antigravity | `agy acp` JSON-RPC 2.0 | 每群独立持久 ACP 会话 | 默认免确认；可选 TaskBar 确认 |
+| Factory Droid | Factory TypeScript SDK | 每群独立 SDK 会话 | 默认免确认；可选 TaskBar 确认 |
 | Pi Coding Agent | `pi --mode rpc` | 每群独立 Pi 会话 | 保留 Pi 原有权限；取消扩展的交互对话框 |
 
 ## 二、通用五步接入流程（从安装到群聊协作）
@@ -186,9 +186,9 @@ pgrep -af '[d]sh.*web'
 
 同一组织成员可以邀请组织归属 Agent；个人助理由创建者首次邀请，加入后群内其他成员也可调用。输入框上方从红色 **未连接** 变为 **空闲待命** 时，宿主已连通；发送一条短任务并检查群聊回复。
 
-### 第 5 步：调用、审批与日常管理
+### 第 5 步：调用与日常管理
 
-在输入框输入 `@` 并选择 Agent 发送任务。支持 TaskBar 权限确认的适配器将工具权限请求显示为 TaskBar 确认卡，卡片列出工具名与参数；该 Agent 的成员阅读后点击 **允许执行**，主机验证签名后批准该次操作。豆包工具权限由所选豆包运行时的权限模式管理。
+在输入框输入 `@` 并选择 Agent 发送任务。Codex、Claude Code、WorkBuddy、Antigravity 和 Factory Droid 默认免确认，以免日常编程在群聊中产生过多的工具确认卡。需要逐项确认时，在 `connect` 或 `start` 时传入 `--require-approval`；该 Agent 的成员可在 TaskBar 查看工具与参数，并点击 **允许执行**。豆包使用自身权限模式，不提供 TaskBar 工具确认卡；DSH 和 Pi 的权限行为不变。
 
 ![TaskBar 工具参数、确认按钮与等待状态](./docs/assets/taskbar-approval.png)
 
@@ -200,7 +200,7 @@ pgrep -af '[d]sh.*web'
 
 ### 1. OpenAI Codex（`@nia-teams/codex-bridge`）
 
-Codex（≥ 0.167.0）通过 app-server JSON-RPC 执行。每群保存持久线程，运行中消息可追加当前轮次；默认 read-only sandbox 和 on-request 审批。修改项目可选 `--sandbox workspace-write`，命令与文件请求通过 TaskBar 确认。
+Codex（≥ 0.167.0）通过 app-server JSON-RPC 执行。每群保存持久线程，运行中消息可追加当前轮次。默认沙箱为 `workspace-write`；选用 `--require-approval` 时默认为 `read-only`。显式 `--sandbox` 优先。
 
 ```sh
 nia-codex start --cwd "/path/to/workspace" --daemon
@@ -208,7 +208,7 @@ nia-codex start --cwd "/path/to/workspace" --daemon
 
 ### 2. Claude Code（`@nia-teams/claude-code-plugin`）
 
-SDK 守护进程通过 Claude Agent SDK 运行，按群保存会话，工具权限请求显示为 TaskBar 确认卡。`--model` 选择模型，`--full-auto` 跳过桥接确认，`--claude-bin` 指定本机可执行文件。
+SDK 守护进程通过 Claude Agent SDK 运行，按群保存会话。`--model` 选择模型，`--claude-bin` 指定本机可执行文件。
 
 ```sh
 nia-claude start --cwd "/path/to/workspace" --daemon
@@ -252,7 +252,7 @@ nia-agy pair --name 'My Antigravity'
 nia-agy start --cwd "/path/to/workspace" --daemon
 ```
 
-`--agy-bin` / `AGY_BIN` 选择本地已登录的 agy；`--mode` 选择 default、accept-edits、auto 或 plan，`--model` 选择可用模型，`--sandbox` 透传布尔选项。`--full-auto` / `--bypass-approvals` 关闭桥接确认并向 `agy acp` 传入跳过权限确认的标志。详见 [Antigravity 接入指南](./packages/agy/README_CN.md)。
+`--agy-bin` / `AGY_BIN` 选择本地已登录的 agy；`--mode` 选择 default、accept-edits、auto 或 plan，`--model` 选择可用模型，`--sandbox` 透传布尔选项。详见 [Antigravity 接入指南](./packages/agy/README_CN.md)。
 
 ### 7. Factory Droid（`@nia-teams/droid-bridge`）
 
@@ -264,7 +264,7 @@ nia-droid pair --name 'My Droid'
 nia-droid start --cwd "/path/to/workspace" --daemon
 ```
 
-`--droid-bin` / `DROID_BIN` 选择可执行文件；`--model`、`--effort`、`--autonomy` 配置会话。未指定自主级别时保留 Droid 默认值，`--full-auto` 设置 high 并跳过桥接权限确认。详见 [Factory Droid 接入指南](./packages/droid/README_CN.md)。
+`--droid-bin` / `DROID_BIN` 选择可执行文件；`--model`、`--effort`、`--autonomy` 配置会话。免确认模式在未指定 `--autonomy` 时使用 `high`。详见 [Factory Droid 接入指南](./packages/droid/README_CN.md)。
 
 ### 8. Pi Coding Agent (`@nia-teams/pi-bridge`)
 
@@ -295,7 +295,7 @@ Alice (<userId>) [<messageId>] <timestamp>:
 
 TaskBar 批准由 Nia Teams 先校验 Agent 成员身份，再签发 RS256 `nia/confirmationToken`。主机通过 `@nia-teams/mcp-sdk/auth` 和 `${issuer}/oauth2/jwks` 验证签名、issuer、audience、有效期、service 身份、人类确认、卡片 ID、工具名和 canonical JSON 参数 SHA-256 摘要。卡片绑定一个待执行操作；聊天里的“允许”或角色字段不能代替签名验证。
 
-主机配置目录保存 Ed25519 私钥和配对身份，目录/文件权限分别为 `0700`/`0600`。更换配对服务、重绑或解绑会影响旧身份，不由群聊正文控制。本机模型登录凭证、桌面 Cookie 与桥接密钥分别归各自运行时管理。多群上下文隔离不等于工作区或 OS 隔离；`--full-auto` 由本地操作者选择。
+主机配置目录保存 Ed25519 私钥和配对身份，目录/文件权限分别为 `0700`/`0600`。更换配对服务、重绑或解绑会影响旧身份，不由群聊正文控制。本机模型登录凭证、桌面 Cookie 与桥接密钥分别归各自运行时管理。多群上下文隔离不等于工作区或 OS 隔离；在主机上选择工具权限模式。
 
 ## 五、仓库结构与本地开发验证
 

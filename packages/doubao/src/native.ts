@@ -53,7 +53,7 @@ export async function readyNativeDoubao(binary: string, cwd: string, interactive
 }
 
 /** Official text CLI transport: its login, flags and session markers differ from CDP. */
-export async function runNativeDoubao(binary: string, options: { cwd: string; model?: string; fullAuto?: boolean }, context: TurnContext, resume?: string): Promise<TurnResult> {
+export async function runNativeDoubao(binary: string, options: { cwd: string; model?: string; fullAuto: boolean }, context: TurnContext, resume?: string): Promise<TurnResult> {
   context.signal.throwIfAborted();
   const result = await new Promise<{ text: string; sessionId?: string; code: number | null; stderr: string }>((resolveTurn, reject) => {
     const args = ['-C', options.cwd, '--permission-mode', options.fullAuto ? 'always_allow' : 'ask_always',

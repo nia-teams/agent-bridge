@@ -9,9 +9,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     'group-link': { type: 'string' }, 'agent-name': { type: 'string' }, 'no-browser': { type: 'boolean' }, 'no-start': { type: 'boolean' },
     daemon: { type: 'boolean' }, 'log-file': { type: 'string' },
-    'server-url': { type: 'string' }, 'config-dir': { type: 'string' }, name: { type: 'string' }, label: { type: 'string' }, cwd: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string' }, autonomy: { type: 'string' }, 'full-auto': { type: 'boolean' }, 'droid-bin': { type: 'string' }, help: { type: 'boolean', short: 'h' },
+    'server-url': { type: 'string' }, 'config-dir': { type: 'string' }, name: { type: 'string' }, label: { type: 'string' }, cwd: { type: 'string' }, model: { type: 'string' }, effort: { type: 'string' }, autonomy: { type: 'string' }, 'require-approval': { type: 'boolean' }, 'full-auto': { type: 'boolean' }, 'droid-bin': { type: 'string' }, help: { type: 'boolean', short: 'h' },
   } });
-  if (values.help || positionals.length === 0) { console.log('nia-droid connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--daemon] [--log-file <path>]\nnia-droid pair [--server-url <url>] [--config-dir <dir>] [--name <label>]\nnia-droid status [--config-dir <dir>]\nnia-droid start [--daemon] [--log-file <path>] [--config-dir <dir>] [--cwd <dir>] [--model <model>] [--effort <level>] [--autonomy <off|low|medium|high>] [--full-auto] [--droid-bin <path>]'); return; }
+  if (values['require-approval'] && values['full-auto']) throw new Error('--require-approval cannot be combined with --full-auto');
+  const fullAuto = !values['require-approval'];
+  if (values.help || positionals.length === 0) { console.log('nia-droid connect [--group-link <url-or-token>] [--agent-name <name>] [--server-url <origin>] [--config-dir <dir>] [--label <label>] [--no-browser] [--no-start] [--cwd <dir>] [--require-approval] [--daemon] [--log-file <path>]\nnia-droid pair [--server-url <url>] [--config-dir <dir>] [--name <label>]\nnia-droid status [--config-dir <dir>]\nnia-droid start [--daemon] [--log-file <path>] [--config-dir <dir>] [--cwd <dir>] [--model <model>] [--effort <level>] [--autonomy <off|low|medium|high>] [--require-approval] [--droid-bin <path>]\nFull-auto is the default; --full-auto is accepted for compatibility.'); return; }
   if (positionals.length !== 1) throw new Error('Expected one command');
   validateDroidOptions({ cwd: values.cwd ?? process.cwd(), effort: values.effort, autonomy: values.autonomy });
   const configDir = resolve(values['config-dir'] ?? defaultConfigDir('nia-teams-droid', 'NIA_DROID_CONFIG_DIR'));
@@ -32,5 +34,5 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   await resolveDroidBinary(values['droid-bin']);
 
   const cwd = resolve(values.cwd ?? process.cwd());
-  await runSessionDaemon(createDroidRunner({ cwd, model: values.model, effort: values.effort, autonomy: values.autonomy, fullAuto: values['full-auto'], droidBin: values['droid-bin'] }), { ...clientBranding, configDir, cwd, runtime: 'Factory Droid', approvalTool: 'droid.approval', fullAuto: values['full-auto'] });
+  await runSessionDaemon(createDroidRunner({ cwd, model: values.model, effort: values.effort, autonomy: values.autonomy, fullAuto, droidBin: values['droid-bin'] }), { ...clientBranding, configDir, cwd, runtime: 'Factory Droid', approvalTool: 'droid.approval', fullAuto });
 }

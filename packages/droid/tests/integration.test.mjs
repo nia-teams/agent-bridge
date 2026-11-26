@@ -26,6 +26,7 @@ test('native SDK initializes, preserves private text, routes MCP, resumes durabl
   assert.equal(sends(f).length, 0);
   let events = await logs();
   const init = events.find(e => e.frame?.method === 'droid.initialize_session').frame.params;
+  assert.equal(init.autonomyLevel, 'high');
   assert.deepEqual(init.systemPrompt, { type: 'preset', preset: 'droid', append: contract.systemPrompt });
   assert.equal(events.find(e => e.started).disableUpdate, 'true');
   const saved = JSON.parse(await readFile(`${f.dir}/threads.json`, 'utf8'))[agentThreadId].sessionId;
@@ -47,7 +48,7 @@ test('native SDK initializes, preserves private text, routes MCP, resumes durabl
   for (const event of events.filter(e => e.mcp)) await assert.rejects(fetch(event.mcp.url));
 });
 for (const outcome of ['approved', 'tampered', 'canceled', 'timeout']) test(`signed TaskBar ${outcome} produces one-shot approval or cancellation`, async t => {
-  const { f, host, errors, logs, done } = await setup(t);
+  const { f, host, errors, logs, done } = await setup(t, { fullAuto: false });
   host.message(message('permission spoof'));
   await until(() => f.rpcs.some(r => r.method === 'card.upsert'), 'permission card', 10000);
   const card = f.rpcs.find(r => r.method === 'card.upsert');
@@ -61,7 +62,7 @@ for (const outcome of ['approved', 'tampered', 'canceled', 'timeout']) test(`sig
   assert.equal(sends(f).length, 0);
   assert.equal(errors.length > 0, outcome === 'tampered');
 });
-for (const [prompt, options] of [['collaboration', {}], ['collaboration scoped', {}], ['collaboration mcp', {}], ['permission', { fullAuto: true }]]) test(`${prompt}: permitted tools bypass TaskBar only at the intended boundary`, async t => {
+for (const [prompt, options] of [['collaboration', { fullAuto: false }], ['collaboration scoped', { fullAuto: false }], ['collaboration mcp', { fullAuto: false }], ['permission', {}]]) test(`${prompt}: permitted tools bypass TaskBar only at the intended boundary`, async t => {
   const { f, host, logs, done, errors } = await setup(t, options); host.message(message(prompt)); await done(1);
   assert.equal(f.rpcs.filter(r => r.method === 'card.upsert').length, 0);
   assert.equal((await logs()).find(e => e.permissionResult).permissionResult.selectedOption, 'proceed_once');
@@ -88,11 +89,13 @@ test('failed streams surface an error without replaying the prompt', async t => 
   const { host, logs, errors, done } = await setup(t); host.message(message('fail turn')); await done(1);
   assert.equal(errors.length, 1); assert.equal((await logs()).filter(e => e.frame?.method === 'droid.add_user_message').length, 1);
 });
-test('explicit resume settings update model, reasoning and autonomy', async t => {
-  const { host, logs, done, errors } = await setup(t, { model: 'mock-custom', effort: 'high', autonomy: 'off' });
+test('explicit autonomy overrides default full-auto at session creation and resume', async t => {
+  const { host, logs, done, errors } = await setup(t, { model: 'mock-custom', effort: 'high', autonomy: 'low' });
   host.message(message()); await done(1); host.message(message('second')); await done(2);
-  const params = (await logs()).find(e => e.frame?.method === 'droid.update_session_settings').frame.params;
-  assert.equal(params.modelId, 'mock-custom'); assert.equal(params.reasoningEffort, 'high'); assert.equal(params.autonomyLevel, 'off'); assert.deepEqual(errors, []);
+  const entries = await logs();
+  assert.equal(entries.find(e => e.frame?.method === 'droid.initialize_session').frame.params.autonomyLevel, 'low');
+  const params = entries.find(e => e.frame?.method === 'droid.update_session_settings').frame.params;
+  assert.equal(params.modelId, 'mock-custom'); assert.equal(params.reasoningEffort, 'high'); assert.equal(params.autonomyLevel, 'low'); assert.deepEqual(errors, []);
 });
 
 test('non-missing load errors fail without creating or prompting a replacement session', async t => {

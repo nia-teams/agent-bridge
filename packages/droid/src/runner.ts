@@ -24,6 +24,7 @@ export async function resolveDroidBinary(explicit?: string): Promise<string> {
 }
 export function createDroidRunner(options: DroidOptions): TurnRunner {
   validateDroidOptions(options);
+  const fullAuto = options.fullAuto ?? true;
   return async context => {
     const binary = await resolveDroidBinary(options.droidBin);
     context.signal.throwIfAborted();
@@ -31,7 +32,7 @@ export function createDroidRunner(options: DroidOptions): TurnRunner {
     const endpoint = await server.start();
     const mcpConfig = { type: 'http' as const, name: 'nia', url: endpoint.url, headers: Object.entries(endpoint.headers).map(([name, value]) => ({ name, value })) };
     let transport: ProcessTransport | undefined, session: DroidSession | undefined;
-    const settings = { ...(options.model !== undefined ? { modelId: options.model } : {}), ...(options.effort !== undefined ? { reasoningEffort: options.effort as ReasoningEffort } : {}), ...(options.fullAuto ? { autonomyLevel: AutonomyLevel.High } : options.autonomy !== undefined ? { autonomyLevel: options.autonomy as AutonomyLevel } : {}) };
+    const settings = { ...(options.model !== undefined ? { modelId: options.model } : {}), ...(options.effort !== undefined ? { reasoningEffort: options.effort as ReasoningEffort } : {}), ...(options.autonomy !== undefined ? { autonomyLevel: options.autonomy as AutonomyLevel } : fullAuto ? { autonomyLevel: AutonomyLevel.High } : {}) };
     const handlers: Pick<CreateSessionOptions, 'permissionHandler' | 'askUserHandler'> = {
       permissionHandler: async params => {
         for (const entry of params.toolUses) {
@@ -39,7 +40,7 @@ export function createDroidRunner(options: DroidOptions): TurnRunner {
           const collaboration = namespace === 'nia' || name.startsWith('nia___') || name.startsWith('mcp__nia__');
           if (collaboration) continue;
           if (context.signal.aborted) return { selectedOption: ToolConfirmationOutcome.Cancel };
-          if (options.fullAuto) continue;
+          if (fullAuto) continue;
           const decision = await context.permission(`droid:${namespace ? `${namespace}:` : ''}${name}`, { input, confirmationType: entry.confirmationType, details: entry.details }, context.signal);
           if (decision.behavior !== 'allow') return { selectedOption: ToolConfirmationOutcome.Cancel };
         }

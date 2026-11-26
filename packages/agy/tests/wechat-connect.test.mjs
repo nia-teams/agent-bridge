@@ -1,3 +1,4 @@
+import { approvalCliSuite } from '../../../tests/approval-cli-suite.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { promisify } from 'node:util';
@@ -5,10 +6,11 @@ import { execFile } from 'node:child_process';
 import { connectFixture, groupToken, pollSecret, startPath, statusPath, challengePath, joinPath } from '../../core/tests/connect-fixture.mjs';
 const exec = promisify(execFile);
 const entry = new URL('../bin/nia-agy.mjs', import.meta.url);
+approvalCliSuite(entry, true);
 test('connect CLI prints the terminal QR, uses the default name and reuses credentials without QR', async t => {
   const f = await connectFixture(t);
   const common = ['connect', '--server-url', f.url, '--config-dir', f.dir, '--label', 'test-host', '--no-browser', '--no-start'];
-  const first = await exec(process.execPath, [entry.pathname, ...common]);
+  const first = await exec(process.execPath, [entry.pathname, ...common, '--require-approval']);
   assert.ok(first.stdout.includes('Agent: Google Antigravity (@external-helper)'));
   assert.match(first.stdout, /[█▀▄]/);
   assert.match(first.stdout, /Scan this QR code with WeChat:/);
@@ -17,7 +19,7 @@ test('connect CLI prints the terminal QR, uses the default name and reuses crede
   assert.ok(first.stdout.includes(`Handoff URL: ${f.defaultHandoffUrl}`));
   assert.ok(!first.stdout.includes(pollSecret));
   assert.doesNotMatch(first.stdout, /Started daemon/);
-  const second = await exec(process.execPath, [entry.pathname, ...common, '--group-link', `${f.url}/join/${groupToken}`]);
+  const second = await exec(process.execPath, [entry.pathname, ...common, '--full-auto', '--group-link', `${f.url}/join/${groupToken}`]);
   assert.doesNotMatch(second.stdout, /Scan this QR code with WeChat:|[█▀▄]/);
   assert.match(second.stdout, /GroupChat: Local Chat \(group-fixture\)/);
   assert.deepEqual(f.requests.map(r => r.path), [startPath, statusPath, challengePath, joinPath]);

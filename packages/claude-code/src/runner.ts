@@ -8,6 +8,7 @@ export async function resolveClaudeBinary(explicit?: string): Promise<string> {
   return findExecutable('claude', explicit ?? process.env.CLAUDE_BIN, [join(homedir(), '.local/bin/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude']);
 }
 export function createClaudeRunner(options: ClaudeRunnerOptions): TurnRunner {
+  const fullAuto = options.fullAuto ?? true;
   return async context => {
     const binary = await resolveClaudeBinary(options.claudeBin);
     context.signal.throwIfAborted();
@@ -23,12 +24,17 @@ export function createClaudeRunner(options: ClaudeRunnerOptions): TurnRunner {
           return spawn(command.file, command.args, { ...command.options, cwd: options.cwd, env: options.env, signal: options.signal, stdio: ['pipe', 'pipe', 'pipe'] });
         } } : {}),
         pathToClaudeCodeExecutable: binary, cwd: options.cwd, model: options.model, resume: context.resume,
-        abortController: controller, permissionMode: options.fullAuto ? 'bypassPermissions' : 'default', allowDangerouslySkipPermissions: Boolean(options.fullAuto),
+        abortController: controller, permissionMode: fullAuto ? 'bypassPermissions' : 'default', allowDangerouslySkipPermissions: fullAuto,
         settingSources: ['user', 'project', 'local'], systemPrompt: { type: 'preset', preset: 'claude_code', append: context.systemPrompt },
         mcpServers: { nia: server as unknown as import('@anthropic-ai/claude-agent-sdk').McpSdkServerConfigWithInstance }, strictMcpConfig: true,
         canUseTool: async (name, input, detail) => {
           // Collaboration tools own their server-side authorization and confirmations.
           if (name.startsWith('mcp__nia__')) return { behavior: 'allow', updatedInput: input };
+          if (fullAuto && name !== 'AskUserQuestion') {
+            controller.signal.throwIfAborted();
+            detail.signal?.throwIfAborted();
+            return { behavior: 'allow', updatedInput: input };
+          }
           const result = await context.permission(name, input, detail.signal);
           return result.behavior === 'allow' ? { behavior: 'allow', updatedInput: result.updatedInput ?? input } : { behavior: 'deny', message: result.message ?? 'Denied' };
         }, stderr: data => process.stderr.write(data),

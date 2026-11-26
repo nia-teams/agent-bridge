@@ -69,7 +69,7 @@ test('Doubao auth failures surface once without resend or GroupChat publication'
   assert.equal((await records()).filter(a => a.includes('create')).length, 1);
 });
 test('Doubao pending native approval fails closed and stops the live task, no pretend TaskBar approval', async t => {
-  const { f, host, errors, records } = await setup(t);
+  const { f, host, errors, records } = await setup(t, { fullAuto: false });
   process.env.NIA_MOCK_WAIT = 'approval';
   host.message(message('approval-needed'));
   await until(() => errors.length > 0, 'native approval', 10000);

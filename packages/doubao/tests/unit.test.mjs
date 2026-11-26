@@ -59,7 +59,7 @@ test('desktop create then send persists receipt and returns reply.text without n
   assert.equal(create[create.indexOf('--platform') + 1], 'headless');
   assert.equal(create[create.indexOf('--workspace') + 1], dir);
   assert.equal(create[create.indexOf('--runtime') + 1], 'local');
-  assert.equal(create[create.indexOf('--permission') + 1], 'AskOnRisk');
+  assert.equal(create[create.indexOf('--permission') + 1], 'FullAccess');
   assert.equal(create.at(-1), 'Server policy\n\nhi --full-auto -literal');
   assert.ok(records.some(a => a.includes('send') && a.includes(sessions[0].split(':')[1])));
   for (const args of records) assert.doesNotThrow(() => parseOptions(args));
@@ -119,7 +119,8 @@ for (const scenario of ['malformed', 'missing-receipt', 'authfail']) test(`submi
 });
 for (const scenario of ['mismatch', 'empty', 'approval']) test(`wait ${scenario} refuses a false final`, async t => {
   const { make, calls, context } = await setup(t); process.env.NIA_MOCK_WAIT = scenario;
-  await assert.rejects(make()(context()), /mismatched|without assistant|waiting_input/);
+  const expected = { mismatch: /mismatched/, empty: /without assistant/, approval: /needs interactive input.*TaskBar/ };
+  await assert.rejects(make(scenario === 'approval' ? { fullAuto: false } : {})(context()), expected[scenario]);
   if (scenario !== 'empty') assert.ok((await calls()).some(a => a.includes('stop')));
 });
 for (const stale of ['cli:old-native-uuid', 'doubao:1234567890123456789', 'headless:1234567890123456789', 'legacy-unprefixed']) test(`work ignores stale resume ${stale}`, async t => {
