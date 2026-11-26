@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 const log = value => { if (process.env.AGY_TEST_LOG) appendFileSync(process.env.AGY_TEST_LOG, JSON.stringify({ pid: process.pid, ...value }) + '\n'); };
@@ -15,7 +15,7 @@ const finish = (id, sid, text = 'Hello from Antigravity') => {
   result(id, { stopReason: 'end_turn', usage: { inputTokens: 9, outputTokens: 3 } });
 };
 async function request(m) {
-  log({ kind: 'request', method: m.method, params: m.params }); const p = m.params ?? {};
+  log({ kind: 'request', id: m.id, method: m.method, params: m.params }); const p = m.params ?? {};
   switch (m.method) {
     case 'initialize':
       if (process.env.AGY_TEST_INIT === 'hang') return;
@@ -25,17 +25,23 @@ async function request(m) {
     case 'session/new': {
       if (typeof p.systemPromptAppend !== 'string' || !p.systemPromptAppend) throw new Error('Missing server system prompt');
       if (process.env.AGY_TEST_NEW === 'missing-id') return result(m.id, {});
-      const sid = randomUUID(); sessions.set(sid, p); return result(m.id, { sessionId: sid, models: { availableModels: [] }, modes: { currentModeId: 'default' } });
+      const sid = randomUUID(); sessions.set(sid, p);
+      const opened = () => result(m.id, { sessionId: sid, models: { availableModels: [] }, modes: { currentModeId: 'default' } });
+      if (process.env.AGY_TEST_OPEN_DELAY) return setTimeout(opened, Number(process.env.AGY_TEST_OPEN_DELAY));
+      return opened();
     }
     case 'session/resume':
       if (typeof p.systemPromptAppend !== 'string' || !p.systemPromptAppend) throw new Error('Missing resumed server system prompt');
       if (process.env.AGY_TEST_RESUME === 'crash') process.exit(7);
-      if (process.env.AGY_TEST_RESUME === 'error' || !sessions.has(p.sessionId)) return send({ id: m.id, error: { code: -32002, message: 'Session missing' } });
-      sessions.set(p.sessionId, p); return result(m.id, { sessionId: process.env.AGY_TEST_RESUME === 'mismatch' ? 'wrong' : p.sessionId });
+      if (process.env.AGY_TEST_RESUME === 'error' || (!sessions.has(p.sessionId) && !['ok', 'mismatch'].includes(process.env.AGY_TEST_RESUME))) return send({ id: m.id, error: { code: -32002, message: 'Session missing' } });
+      sessions.set(p.sessionId, p);
+      const resumed = () => result(m.id, { sessionId: process.env.AGY_TEST_RESUME === 'mismatch' ? 'wrong' : p.sessionId });
+      if (process.env.AGY_TEST_OPEN_DELAY) return setTimeout(resumed, Number(process.env.AGY_TEST_OPEN_DELAY));
+      return resumed();
     case 'session/set_mode': case 'session/set_model': return result(m.id, {});
     case 'session/cancel':
       if (process.env.AGY_TEST_IGNORE_CANCEL === '1') return;
-      if (held.has(p.sessionId)) { result(held.get(p.sessionId), { stopReason: 'cancelled' }); held.delete(p.sessionId); }
+      for (const [id, sid] of held) if (sid === p.sessionId) { result(id, { stopReason: 'cancelled' }); held.delete(id); }
       for (const [id, request] of pending) if (request.sid === p.sessionId) { result(request.id, { stopReason: 'cancelled' }); pending.delete(id); }
       return;
     case 'session/prompt': {
@@ -45,7 +51,14 @@ async function request(m) {
       update('foreign-session', { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'DO NOT PUBLISH' } });
       if (text.includes('crash child')) process.exit(8);
       if (text.includes('oversized')) { update(sid, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'x'.repeat(481 * 1024) } }); return result(m.id, { stopReason: 'end_turn' }); }
-      if (text.includes('hold')) { held.set(sid, m.id); return; }
+      if (text.includes('supersede first')) { held.set(m.id, sid); return; }
+      if (text.includes('supersede second')) {
+        for (const [id, heldSid] of held) if (heldSid === sid) {
+          send({ id, error: { code: -32000, message: 'Superseded' } }); held.delete(id);
+        }
+        log({ kind: 'superseded' });
+      }
+      if (text.includes('hold')) { held.set(m.id, sid); return; }
       if (text.includes('permission')) {
         // Deliberately collide with a client request ID; bidirectional IDs are separate.
         const id = text.includes('numeric permission') ? 1 : String(++serverId);
@@ -66,6 +79,16 @@ async function request(m) {
           log({ kind: 'history', result: await client.callTool({ name: 'chat_history', arguments: { limit: 3 } }) });
           const content = text.includes('second-tools') ? 'Second scoped update' : 'ACP interim';
           log({ kind: 'send', result: await client.callTool({ name: 'send_message', arguments: { content } }) });
+          if (text.includes('supersede second')) {
+            held.set(m.id, sid);
+            const wait = setInterval(() => {
+              if (!held.has(m.id)) return clearInterval(wait);
+              if (existsSync(`${process.env.AGY_TEST_LOG}.release`)) {
+                clearInterval(wait); held.delete(m.id); finish(m.id, sid);
+              }
+            }, 10);
+            return;
+          }
         } finally { await client.close(); }
         return finish(m.id, sid, 'Internal status only');
       }

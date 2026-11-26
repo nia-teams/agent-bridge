@@ -39,7 +39,7 @@ export class JsonFileStore<T> {
     this.writes = task.catch(() => {}); return task;
   }
 }
-export interface SessionMapping { sessionId: string; groupChatId: string; updatedAt: string; cwd?: string }
+export interface SessionMapping { sessionId: string; groupChatId: string; updatedAt: string; cwd?: string; niaSessionId?: string }
 export class ThreadMapStore {
   private readonly file: JsonFileStore<Record<string, SessionMapping>>;
   private values: Record<string, SessionMapping> = Object.create(null);
@@ -47,7 +47,7 @@ export class ThreadMapStore {
     this.file = new JsonFileStore(configDir, 'threads.json', value => {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid thread mappings');
       for (const entry of Object.values(value)) {
-        if (!entry || typeof entry !== 'object' || typeof entry.sessionId !== 'string' || !entry.sessionId || typeof entry.groupChatId !== 'string' || typeof entry.updatedAt !== 'string' || (entry.cwd !== undefined && (typeof entry.cwd !== 'string' || !entry.cwd))) throw new Error('Invalid thread mapping');
+        if (!entry || typeof entry !== 'object' || typeof entry.sessionId !== 'string' || !entry.sessionId || typeof entry.groupChatId !== 'string' || typeof entry.updatedAt !== 'string' || (entry.cwd !== undefined && (typeof entry.cwd !== 'string' || !entry.cwd)) || (entry.niaSessionId !== undefined && (typeof entry.niaSessionId !== 'string' || !entry.niaSessionId))) throw new Error('Invalid thread mapping');
       }
       return Object.assign(Object.create(null), value);
     });

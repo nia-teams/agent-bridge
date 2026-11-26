@@ -37,14 +37,21 @@ export async function stopSessionDaemon(configDir: string): Promise<number | und
   return signaled ? pid : undefined;
 }
 
-export async function runSessionDaemon(runner: TurnRunner, options: SessionHostOptions): Promise<void> {
+export function runSessionDaemon(runner: TurnRunner, options: SessionHostOptions): Promise<void> {
+  return runBridgeDaemon(options, (bridge, onError) => new SessionHost(bridge, runner, { ...options, onError }));
+}
+
+export async function runBridgeDaemon(
+  options: Pick<SessionHostOptions, 'configDir' | 'onError' | 'clientName' | 'avatar'>,
+  createHost: (bridge: BridgeClient, onError: (error: Error) => void) => { start(): Promise<void>; close(): Promise<void> },
+): Promise<void> {
   const onError = options.onError ?? ((error: Error) => console.error(`[${new Date().toISOString()}] ${error.message}`));
   const bridge = new BridgeClient(await loadCredentials(options.configDir), { onError, clientName: options.clientName, avatar: options.avatar });
-  const host = new SessionHost(bridge, runner, { ...options, onError });
   const path = join(await configDirectory(options.configDir, false), pidFilename);
   const identity = await processIdentity(process.pid);
   if (!identity) throw new Error('Cannot register daemon process identity');
   const record = { pid: process.pid, identity, token: randomUUID() };
+  const host = createHost(bridge, onError);
   let stopping: Promise<void> | undefined;
   const stop = () => stopping ??= (async () => {
     // Closing the transport first releases RPCs waiting for ready during cleanup.

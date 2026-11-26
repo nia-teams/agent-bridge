@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { permissionOption, AgyRunner, resolveAgyBinary } from '../dist/runner.js';
+import { permissionOption, AgyHost, resolveAgyBinary } from '../dist/host.js';
 import { McpRelay, callRelay } from '../dist/mcp-relay.js';
-import { fixture, contract } from '../../core/tests/helpers.mjs';
+import { fixture, contract, message, until } from '../../core/tests/helpers.mjs';
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL('../bin/nia-agy.mjs', import.meta.url));
 test('permission decisions select only once options, preserve IDs and never widen to always', () => {
@@ -20,22 +20,26 @@ test('permission decisions select only once options, preserve IDs and never wide
   for (const value of [null,{},[],[{optionId:3,kind:'allow_once'}]]) assert.equal(permissionOption(value,true),undefined);
 });
 test('invalid modes and nonpositive request timeouts fail before any process starts', () => {
-  for (const options of [{mode:'unsafe'}, {requestTimeoutMs:0}, {promptTimeoutMs:-1}]) assert.throws(() => new AgyRunner({cwd:tmpdir(),...options}));
+  for (const options of [{mode:'unsafe'}, {requestTimeoutMs:0}, {promptTimeoutMs:-1}]) assert.throws(() => new AgyHost({}, { configDir: tmpdir(), cwd: tmpdir(), ...options }));
 });
-test('MCP loopback capabilities isolate turns, reject destination injection and revoke on finish', async t => {
+test('MCP loopback capabilities isolate sessions, reject destination injection and revoke on finish', async t => {
   const relay = new McpRelay(); await relay.start(); t.after(() => relay.close());
   const calls = [], controller = new AbortController();
   const context = { ...contract, signal:controller.signal, callTool: async (name, args) => {
     if (name === 'send_message') { if (typeof args.content !== 'string' || !args.content.trim()) throw new Error('Empty message'); calls.push(['a', args.content]); return { content: '消息已发布到聊天' }; }
     return { content: JSON.stringify({ limit: args.limit ?? 50, offset: args.offset ?? 0 }) };
   } };
-  const scope = relay.register(context); const env = Object.fromEntries(scope.env.map(e => [e.name,e.value]));
+  let active = context;
+  const scope = relay.register({ tools: contract.tools, current: () => active }); const env = Object.fromEntries(scope.env.map(e => [e.name,e.value]));
   const call = (name,args,token=env.NIA_AGY_MCP_TOKEN) => callRelay(name,args,env.NIA_AGY_MCP_URL,token);
   assert.deepEqual(await call('send_message',{content:'hello'}),{ content: '消息已发布到聊天' });
   assert.deepEqual(await call('chat_history',{}),{content:'{"limit":50,"offset":0}'});
   for (const [name,args] of [['unknown',{}],['send_message',{content:' '}]]) await assert.rejects(call(name,args));
   await assert.rejects(call('chat_history',{},'wrong-token'));
-  const other = relay.register({...context,callTool:async (name,args)=>{ calls.push(['b',args.content]); return {content:'sent'}; }});
+  assert.deepEqual(await call('chat_history',{}),{content:'{"limit":50,"offset":0}'});
+  active = undefined; await assert.rejects(call('chat_history',{}), /Inactive tool scope/);
+  active = context;
+  const other = relay.register({ tools: contract.tools, current: () => ({ ...context, callTool: async (name,args) => { calls.push(['b',args.content]); return {content:'sent'}; } }) });
   const otherEnv=Object.fromEntries(other.env.map(e=>[e.name,e.value]));
   await callRelay('send_message',{content:'other'},otherEnv.NIA_AGY_MCP_URL,otherEnv.NIA_AGY_MCP_TOKEN);
   assert.deepEqual(calls,[['a','hello'],['b','other']]);
@@ -61,37 +65,11 @@ test('CLI help lists all commands; pair label/name aliases, private credentials 
   for (const args of [['start','--mode','bad'],['pair','--timeout-ms','0'],['unknown'],['start','--sandbox','bad']]) await assert.rejects(exec(process.execPath,[cli,...args]));
 });
 
-test('default runner prompt has no wall-clock timer and explicitly disables the ACP request timer', async t => {
-  const runner = new AgyRunner({ cwd: tmpdir(), requestTimeoutMs: 25 });
-  t.after(() => runner.close());
-  await runner.relay.start();
-  let finish, prompting;
-  const started = new Promise(resolve => { prompting = resolve; });
-  const requests = [], timers = [];
-  const client = {
-    available: true,
-    request(method, params, timeout) {
-      requests.push({ method, timeout });
-      if (method === 'session/new') return Promise.resolve({ sessionId: 'long-turn' });
-      if (method === 'session/set_mode') return Promise.resolve({});
-      prompting(); return new Promise(resolve => { finish = resolve; });
-    },
-  };
-  runner.ready = async () => client;
-  const original = globalThis.setTimeout;
-  t.mock.method(globalThis, 'setTimeout', (...args) => { timers.push(args[1]); return original(...args); });
-  const turn = runner.run({ ...contract, signal: new AbortController().signal, prompt: 'long task', session: async () => {} });
-  await started;
-  assert.deepEqual(requests, [{ method: 'session/new', timeout: undefined }, { method: 'session/set_mode', timeout: undefined }, { method: 'session/prompt', timeout: null }]);
-  assert.deepEqual(timers, [], 'runner must not arm any default prompt wall-clock timer');
-  finish({ stopReason: 'end_turn' }); await turn;
-});
-
 test('MCP stdio helper preserves relay tool errors, while callRelay still rejects', async t => {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
   const relay = new McpRelay(); await relay.start(); t.after(() => relay.close());
-  const scope = relay.register({ ...contract, signal: new AbortController().signal, callTool: async () => { throw new Error('Agent Bridge disconnected'); } });
+  const scope = relay.register({ tools: contract.tools, current: () => ({ signal: new AbortController().signal, callTool: async () => { throw new Error('Agent Bridge disconnected'); } }) });
   const env = Object.fromEntries(scope.env.map(e => [e.name, e.value]));
   await assert.rejects(callRelay('chat_history', {}, env.NIA_AGY_MCP_URL, env.NIA_AGY_MCP_TOKEN), /^Error: Agent Bridge disconnected$/);
   const client = new Client({ name: 'regression', version: '1' });
@@ -134,28 +112,148 @@ test('oversized explicit ACP request budgets clamp without overflow warnings or 
   await client.close(); await Promise.all([defaultBudget, explicitBudget]);
 });
 
-test('oversized explicit AGY prompt budget clamps without immediate cancellation or overflow warnings', async t => {
-  const runner = new AgyRunner({ cwd: tmpdir(), promptTimeoutMs: 3_000_000_000 });
-  t.after(() => runner.close()); await runner.relay.start();
-  const warnings = [], delays = [], original = globalThis.setTimeout;
-  const warning = value => { if (value.name === 'TimeoutOverflowWarning') warnings.push(value); };
-  process.on('warning', warning); t.after(() => process.off('warning', warning));
+test('AgyHost retires older pending requests when the latest completes and applies only an explicit, clamped watchdog', async t => {
+  const f = await fixture(t);
+  const done = [], requests = [];
+  const bridge = {
+    credentials: f.credentials, getContract: () => contract,
+    onReady: () => () => {}, onThreadMessage: () => () => {}, onThreadCancel: () => () => {}, onCardAction: () => () => {},
+    async rpc(method, params) { if (method === 'thread.activity' && params.state === 'idle') done.push(params); return {}; },
+  };
+  const original = globalThis.setTimeout, delays = [];
   t.mock.method(globalThis, 'setTimeout', (...args) => { delays.push(args[1]); return original(...args); });
-  let finish, started;
-  const prompting = new Promise(resolve => { started = resolve; });
-  runner.ready = async () => ({
+  for (const promptTimeoutMs of [undefined, 3_000_000_000]) {
+    const host = new AgyHost(bridge, { configDir: f.dir, cwd: f.dir, promptTimeoutMs });
+    try {
+      await host.start(); await host.relay.start();
+      host.ready = async () => ({
+        available: true,
+        request(method, _params, timeout, signal) {
+          if (method === 'session/new') return Promise.resolve({ sessionId: 'mock-session' });
+          if (method === 'session/resume' || method === 'session/set_mode') return Promise.resolve({});
+          let resolve, reject;
+          const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; });
+          const pending = { promise, resolve, reject };
+          requests.push({ ...pending, timeout, signal });
+          signal.addEventListener('abort', () => pending.reject(signal.reason), { once: true });
+          return pending.promise;
+        },
+      });
+      const sent = requests.length;
+      host.message(message('original'));
+      await until(() => requests.length === sent + 1);
+      const latest = message('steer'); host.message(latest);
+      assert.equal(requests.length, sent + 2);
+      const [older, newer] = requests.slice(sent);
+      assert.equal(older.timeout, null); assert.equal(newer.timeout, null);
+      newer.resolve({ stopReason: 'end_turn' });
+      await until(() => done.at(-1)?.deliveryId === latest.deliveryId);
+      assert.equal(older.signal.aborted, true);
+      assert.equal(done.at(-1).errorMessage, undefined);
+      assert.equal(delays.filter(delay => delay === 2_147_483_647).length, promptTimeoutMs ? 2 : 0);
+    } finally { await host.close(); }
+  }
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+async function controlledHost(t, rpc, options = {}) {
+  const f = await fixture(t), calls = [], errors = [];
+  const bridge = {
+    credentials: f.credentials, getContract: () => contract,
+    onReady: () => () => {}, onThreadMessage: () => () => {}, onThreadCancel: () => () => {}, onCardAction: () => () => {},
+    rpc: async (method, params, signal) => { calls.push({ method, params }); await rpc?.(method, params, signal); return {}; },
+  };
+  const host = new AgyHost(bridge, { configDir: f.dir, cwd: f.dir, onError: e => errors.push(e), ...options });
+  t.after(() => host.close());
+  await host.start(); await host.relay.start();
+  return { host, calls, errors, dir: f.dir };
+}
+
+const abortFrame = frame => ({ ...frame, type: 'thread.cancel', reason: 'user_aborted' });
+
+test('rotation aborts an old cancel-idle RPC and lets the replacement turn keep its activity and delivery', { timeout: 8000 }, async t => {
+  const first = message('original'), next = { ...message('replacement'), sessionId: 'abcdefabcdefabcdefabcdef' };
+  const oldIdle = deferred(), releaseIdle = deferred(), oldPrompt = deferred(), newPrompt = deferred();
+  const delivered = [];
+  t.after(() => { releaseIdle.resolve(); oldPrompt.resolve({ stopReason: 'cancelled' }); newPrompt.resolve({ stopReason: 'end_turn' }); });
+  const { host, calls, errors } = await controlledHost(t, async (method, params, signal) => {
+    if (method !== 'thread.activity' || params.state !== 'idle') return;
+    if (params.sessionId === first.sessionId) { oldIdle.resolve(signal); await releaseIdle.promise; }
+    signal.throwIfAborted(); delivered.push(params);
+  });
+  const prompts = [];
+  let session = 0;
+  host.ready = async () => ({
     available: true,
-    notify() { assert.fail('oversized prompt budget must not cancel immediately'); },
-    request(method) {
-      if (method === 'session/new') return Promise.resolve({ sessionId: 'large-budget' });
-      if (method === 'session/set_mode') return Promise.resolve({});
-      started(); return new Promise(resolve => { finish = resolve; });
+    notify() { oldPrompt.resolve({ stopReason: 'cancelled' }); },
+    request: async (method, params) => {
+      if (method === 'session/new') return { sessionId: `mock-${++session}` };
+      if (method !== 'session/prompt') return {};
+      prompts.push(params); return params.sessionId === 'mock-1' ? oldPrompt.promise : newPrompt.promise;
     },
   });
-  const turn = runner.run({ ...contract, signal: new AbortController().signal, prompt: 'long task', session: async () => {} });
-  await prompting;
-  assert.deepEqual(delays, [2_147_483_647]);
-  await new Promise(resolve => original(resolve, 20));
-  finish({ stopReason: 'end_turn' }); await turn;
-  assert.deepEqual(warnings, []);
+  host.message(first);
+  await until(() => prompts.length === 1);
+  const oldThread = host.threads.get(first.agentThreadId), retiring = oldThread.worker;
+  await host.cancel(abortFrame(first));
+  await until(() => calls.some(c => c.params.deliveryId === first.deliveryId));
+  const idleSignal = await oldIdle.promise;
+  host.message(next);
+  await until(() => prompts.length === 2);
+  const replacement = host.threads.get(next.agentThreadId), active = replacement.turn;
+  assert.equal(idleSignal.aborted, true);
+  releaseIdle.resolve(); await retiring;
+  assert.equal(replacement.turn, active);
+  assert.equal(active.controller.signal.aborted, false);
+  assert.deepEqual(delivered, []);
+  newPrompt.resolve({ stopReason: 'end_turn' });
+  await until(() => delivered.length === 1);
+  assert.deepEqual(delivered[0], { sessionId: next.sessionId, state: 'idle', deliveryId: next.deliveryId });
+  assert.deepEqual(errors, []);
+});
+
+for (const boundary of ['session/new', 'store.set']) test(`cancel at ${boundary} abandons setup and starts a fresh turn`, { timeout: 8000 }, async t => {
+  const entered = deferred(), release = deferred();
+  t.after(() => release.resolve());
+  const { host, calls, errors, dir } = await controlledHost(t, undefined, { model: 'configured' });
+  const requested = [];
+  let n = 0;
+  host.ready = async () => ({
+    available: true,
+    request: async (method, params) => {
+      requested.push({ method, params });
+      if (method === 'session/new') {
+        const sessionId = `mock-${++n}`;
+        if (n === 1 && boundary === 'session/new') { entered.resolve(); await release.promise; }
+        return { sessionId };
+      }
+      return method === 'session/prompt' ? { stopReason: 'end_turn' } : {};
+    },
+  });
+  if (boundary === 'store.set') {
+    const set = host.store.set.bind(host.store);
+    host.store.set = async (id, entry) => {
+      const write = set(id, entry);
+      if (entry.sessionId === 'v2:mock-1') { entered.resolve(); await release.promise; }
+      return write;
+    };
+  }
+  const first = message('canceled opening'), next = message('fresh opening');
+  host.message(first);
+  await entered.promise;
+  await host.cancel(abortFrame(first));
+  host.message(next); release.resolve();
+  await until(() => calls.some(c => c.params.deliveryId === next.deliveryId));
+  assert.deepEqual(requested.filter(r => r.method === 'session/prompt').map(r => r.params.sessionId), ['mock-2']);
+  assert.equal(requested.some(r => r.method === 'session/resume'), false);
+  if (boundary === 'session/new') assert.equal(requested.some(r => r.params.sessionId === 'mock-1'), false);
+  const stored = JSON.parse(await readFile(join(dir, 'threads.json'), 'utf8'))[next.agentThreadId];
+  assert.equal(stored.sessionId, 'v2:mock-2');
+  assert.deepEqual(calls.filter(c => c.params.state === 'idle').map(c => c.params.deliveryId), [first.deliveryId, next.deliveryId]);
+  assert.deepEqual(errors, []);
 });

@@ -1,11 +1,20 @@
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import type { TurnContext } from '@nia-teams/agent-bridge-core';
+import type { BridgeToolDefinition, ToolCallResult } from '@nia-teams/agent-bridge-core';
 import { isObject } from './acp-client.js';
 
-/** Ephemeral per-turn capabilities bind subprocess tools to a host-supplied GroupChat context. */
+interface ToolContext {
+  signal: AbortSignal;
+  callTool(name: string, args: Record<string, unknown>): Promise<ToolCallResult>;
+}
+interface Scope {
+  tools: BridgeToolDefinition[];
+  current(): ToolContext | undefined;
+}
+
+/** Session-scoped capabilities grant access only while a GroupChat turn is active. */
 export class McpRelay {
-  private readonly scopes = new Map<string, TurnContext>();
+  private readonly scopes = new Map<string, Scope>();
   private server?: Server;
   private url?: string;
   async start(): Promise<void> {
@@ -13,9 +22,10 @@ export class McpRelay {
     const server = createServer((req, res) => {
       const reply = (status: number, value: unknown) => { if (!res.destroyed) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(value)); } };
       if (req.method !== 'POST' || req.url !== '/tool') { reply(404, { error: 'Not found' }); return; }
-      const context = this.scopes.get((req.headers.authorization ?? '').replace(/^Bearer /, ''));
-      if (!context || context.signal.aborted) { reply(403, { error: 'Inactive tool scope' }); return; }
-      void this.handle(req, context, res).catch(error => reply(400, { error: error instanceof Error ? error.message : 'GroupChat tool failed' }));
+      const scope = this.scopes.get((req.headers.authorization ?? '').replace(/^Bearer /, ''));
+      const context = scope?.current();
+      if (!scope || !context || context.signal.aborted) { reply(403, { error: 'Inactive tool scope' }); return; }
+      void this.handle(req, scope.tools, context, res).catch(error => reply(400, { error: error instanceof Error ? error.message : 'GroupChat tool failed' }));
     });
     this.server = server;
     try { await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => { server.removeListener('error', reject); resolve(); }); }); }
@@ -24,18 +34,18 @@ export class McpRelay {
     if (!address || typeof address === 'string') throw new Error('Invalid local MCP endpoint');
     this.url = `http://127.0.0.1:${address.port}/tool`;
   }
-  register(context: TurnContext): { env: Array<{ name: string; value: string }>; revoke(): void } {
+  register(scope: Scope): { env: Array<{ name: string; value: string }>; revoke(): void } {
     if (!this.url) throw new Error('MCP relay is not started');
-    const token = randomBytes(32).toString('base64url'); this.scopes.set(token, context);
-    return { env: [{ name: 'NIA_AGY_MCP_URL', value: this.url }, { name: 'NIA_AGY_MCP_TOKEN', value: token }, { name: 'NIA_AGY_MCP_TOOLS', value: JSON.stringify(context.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))) }], revoke: () => { this.scopes.delete(token); } };
+    const token = randomBytes(32).toString('base64url'); this.scopes.set(token, scope);
+    return { env: [{ name: 'NIA_AGY_MCP_URL', value: this.url }, { name: 'NIA_AGY_MCP_TOKEN', value: token }, { name: 'NIA_AGY_MCP_TOOLS', value: JSON.stringify(scope.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))) }], revoke: () => { this.scopes.delete(token); } };
   }
-  private async handle(req: AsyncIterable<Buffer>, context: TurnContext, res: ServerResponse): Promise<void> {
+  private async handle(req: AsyncIterable<Buffer>, tools: BridgeToolDefinition[], context: ToolContext, res: ServerResponse): Promise<void> {
     const chunks: Buffer[] = []; let size = 0;
     for await (const chunk of req) { size += chunk.length; if (size > 512 * 1024) throw new Error('Tool input too large'); chunks.push(chunk); }
     context.signal.throwIfAborted();
     const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!isObject(body) || !isObject(body.arguments)) throw new Error('Invalid tool request');
-    if (typeof body.name !== 'string' || !context.tools.some(tool => tool.name === body.name)) throw new Error('Unknown tool');
+    if (typeof body.name !== 'string' || !tools.some(tool => tool.name === body.name)) throw new Error('Unknown tool');
     const result = await context.callTool(body.name, body.arguments);
     context.signal.throwIfAborted();
     if (!res.destroyed) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ result })); }
@@ -46,7 +56,7 @@ export class McpRelay {
   }
 }
 export async function callRelay(name: string, args: unknown, url = process.env.NIA_AGY_MCP_URL, token = process.env.NIA_AGY_MCP_TOKEN): Promise<import('@nia-teams/agent-bridge-core').ToolCallResult> {
-  if (!url || !token) throw new Error('Missing MCP turn scope');
+  if (!url || !token) throw new Error('Missing MCP session scope');
   const endpoint = new URL(url);
   if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || endpoint.pathname !== '/tool' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid MCP loopback endpoint');
   const response = await fetch(endpoint, { method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ name, arguments: args }), signal: AbortSignal.timeout(120_000) });

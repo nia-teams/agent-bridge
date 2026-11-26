@@ -304,3 +304,49 @@ for (const scenario of ['changed cwd', 'same cwd', 'stale legacy', 'fresh retry 
     }
   });
 }
+
+for (const rotate of [false, true]) test(`SDK drains same-session backlog without crossing session rotation (${rotate})`, async t => {
+  const f = await fixture(t), bridge = new BridgeClient(f.credentials), contexts = [];
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  const host = new SessionHost(bridge, async context => { contexts.push(context); if (contexts.length === 1) await held; },
+    { configDir: f.dir, runtime: 'Test', approvalTool: 'test' });
+  t.after(async () => { release(); bridge.close(); await host.close(); });
+  await host.start(); await bridge.start();
+  const first = { ...message(), prompt: 'ready' };
+  host.message(first); await until(() => contexts.length === 1);
+  const queued = { ...message(), prompt: 'discard on rotation' };
+  if (rotate) host.message(queued);
+  const sessionId = rotate ? 'abcdefabcdefabcdefabcdef' : first.sessionId;
+  const next = { ...message(), sessionId, prompt: 'Backlog one' };
+  const latest = { ...message('formattable fallback'), sessionId };
+  host.message(next); host.message(latest);
+  assert.equal(contexts[0].signal.aborted, rotate);
+  release();
+  const idles = () => f.rpcs.filter(r => r.params.state === 'idle');
+  await until(() => idles().length === (rotate ? 1 : 2));
+  assert.deepEqual(contexts.map(ctx => ctx.prompt), [first.prompt, `${next.prompt}\n\n${resolveThreadPrompt(latest)}`]);
+  assert.equal(contexts[1].deliveryId, latest.deliveryId);
+  assert.equal(idles().at(-1).params.deliveryId, latest.deliveryId);
+  assert.equal(idles().at(-1).params.sessionId, sessionId);
+});
+
+test('AskUserQuestion consumes the human reply without including it in the next backlog batch', async t => {
+  const f = await fixture(t), bridge = new BridgeClient(f.credentials), prompts = [];
+  let answer;
+  const host = new SessionHost(bridge, async ctx => {
+    prompts.push(ctx.prompt);
+    if (prompts.length === 1) answer = await ctx.permission('AskUserQuestion', { questions: [{ question: 'Continue?' }] });
+  }, { configDir: f.dir, runtime: 'Test', approvalTool: 'test' });
+  t.after(async () => { bridge.close(); await host.close(); });
+  await host.start(); await bridge.start();
+  const first = { ...message(), prompt: 'Ask' };
+  host.message(first);
+  await until(() => f.rpcs.some(r => r.params.state === 'waiting'));
+  host.message({ ...message(), messages: [], prompt: 'Queued one' });
+  host.message({ ...message('yes'), prompt: 'This reply must not be sent as a prompt' });
+  host.message({ ...message(), messages: [], prompt: 'Queued two' });
+  await until(() => f.rpcs.filter(r => r.params.state === 'idle').length === 2);
+  assert.equal(answer.updatedInput.answers['Continue?'], 'yes');
+  assert.deepEqual(prompts, ['Ask', 'Queued one\n\nQueued two']);
+});

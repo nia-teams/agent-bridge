@@ -7,7 +7,7 @@ export class AcpRpcError extends Error {
   constructor(readonly code: number, message: string) { super(message); this.name = 'AcpRpcError'; }
 }
 export const isObject = (value: unknown): value is JsonObject => value !== null && typeof value === 'object' && !Array.isArray(value);
-interface Pending { resolve(value: JsonObject): void; reject(error: Error): void; timer?: ReturnType<typeof setTimeout> }
+interface Pending { resolve(value: JsonObject): void; reject(error: Error): void; timer?: ReturnType<typeof setTimeout>; detach?(): void }
 
 /** One ACP child generation; server requests and client responses use independent ID namespaces. */
 export class AcpClient {
@@ -45,7 +45,7 @@ export class AcpClient {
   private fail(error: Error): void {
     if (this.stopped) return;
     this.stopped = true;
-    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(error); }
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.detach?.(); p.reject(error); }
     this.pending.clear(); this.child.kill('SIGTERM'); this.onExit(error);
   }
   private receive(line: string): void {
@@ -63,7 +63,7 @@ export class AcpClient {
     }
     if (typeof value.id !== 'number') return;
     const p = this.pending.get(value.id); if (!p) return;
-    clearTimeout(p.timer); this.pending.delete(value.id);
+    clearTimeout(p.timer); p.detach?.(); this.pending.delete(value.id);
     if (value.result === undefined && isObject(value.error) && typeof value.error.code === 'number' && typeof value.error.message === 'string') {
       p.reject(new AcpRpcError(value.error.code, value.error.message));
     } else if (isObject(value.result) && value.error === undefined) p.resolve(value.result);
@@ -73,13 +73,19 @@ export class AcpClient {
     if (this.stopped || this.child.stdin.destroyed) throw new Error('ACP child is unavailable');
     this.child.stdin.write(JSON.stringify(value) + '\n');
   }
-  request(method: string, params: JsonObject, timeoutMs: number | null = this.requestTimeoutMs): Promise<JsonObject> {
+  request(method: string, params: JsonObject, timeoutMs: number | null = this.requestTimeoutMs, signal?: AbortSignal): Promise<JsonObject> {
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
+      signal?.throwIfAborted();
       const timer = timeoutMs === null ? undefined : setTimeout(() => this.fail(new Error(`ACP request timeout: ${method}`)), Math.min(2_147_483_647, timeoutMs));
-      this.pending.set(id, { resolve, reject, timer });
+      // Retiring a superseded request forgets its response locally; it never cancels ACP work.
+      const rejectPending = (error: unknown) => { clearTimeout(timer); detach(); this.pending.delete(id); reject(error); };
+      const abort = () => rejectPending(signal?.reason);
+      const detach = () => signal?.removeEventListener('abort', abort);
+      this.pending.set(id, { resolve, reject, timer, detach });
+      signal?.addEventListener('abort', abort, { once: true });
       try { this.write({ jsonrpc: '2.0', id, method, params }); }
-      catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
+      catch (error) { rejectPending(error); }
     });
   }
   notify(method: string, params: JsonObject): void { this.write({ jsonrpc: '2.0', method, params }); }

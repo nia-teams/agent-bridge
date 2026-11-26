@@ -14,7 +14,7 @@ Executable precedence: explicit `agyBin` / CLI `--agy-bin`, `AGY_BIN`, `agy` on 
 
 stdin/stdout carry newline-delimited JSON-RPC 2.0. stderr is diagnostic output. The client uses numeric monotonically increasing IDs; server request IDs may be strings or numbers. An inbound `method` denotes a server request/notification even if its ID matches a pending client request. Replies preserve the server ID's type. Unknown server requests receive `-32601`.
 
-Client control requests default to 30 seconds; prompts have no default wall-clock timeout, including while streaming or awaiting approval. Constructor options `requestTimeoutMs` / `promptTimeoutMs` accept positive overrides; JavaScript watchdog delays are capped at 2,147,483,647 ms to avoid Node timer overflow. When an explicit `promptTimeoutMs` expires, the runner sends `session/cancel` for only that session and fails its turn with `ACP request timeout: session/prompt`, even if the child cooperatively returns `cancelled`. The child is terminated only if the prompt does not settle within two seconds after cancellation; that escalation timer is cleared when the prompt settles. Control-request timeout, malformed framing, oversized frames, stdin error, or process exit reject all pending requests in that process generation. Raw ACP frames are limited to 4 MiB; assistant text chunks are ignored, not accumulated. A later turn may start a new child; a failed prompt is not replayed.
+Client control requests default to 30 seconds; prompts have no default wall-clock timeout, including while streaming or awaiting approval. Constructor options `requestTimeoutMs` / `promptTimeoutMs` accept positive overrides; JavaScript watchdog delays are capped at 2,147,483,647 ms to avoid Node timer overflow. The optional `promptTimeoutMs` starts when the latest prompt is sent. On expiry, the host sends `session/cancel` for only that session and fails its turn with `ACP request timeout: session/prompt`, even if the child cooperatively returns `cancelled`. The child is terminated only if pending work does not settle within two seconds after cancellation. Control-request timeout, malformed framing, oversized frames, stdin error, or process exit reject all pending requests in that process generation. Raw ACP frames are limited to 4 MiB; assistant text chunks are ignored, not accumulated. A later turn may start a new child; a failed prompt is not replayed.
 
 ## 2. Initialization
 
@@ -37,7 +37,7 @@ The response must contain `result.protocolVersion === 1`. `agentCapabilities`, `
       "args": ["<installed package>/dist/mcp-server.js"],
       "env": [
         {"name": "NIA_AGY_MCP_URL", "value": "http://127.0.0.1:<ephemeral-port>/tool"},
-        {"name": "NIA_AGY_MCP_TOKEN", "value": "<ephemeral turn capability>"}
+        {"name": "NIA_AGY_MCP_TOKEN", "value": "<ephemeral session capability>"}
       ]
     }],
     "systemPromptAppend": "<ready.systemPrompt>"
@@ -45,7 +45,7 @@ The response must contain `result.protocolVersion === 1`. `agentCapabilities`, `
 }
 ```
 
-`mcpServers[].env` is an array of `{ name: string, value: string }`, not an environment object. Both session/new and session/resume include `systemPromptAppend: context.systemPrompt`. The appended server instructions include native `<mention userId="member-id" />` syntax and publication/tool rules. A new result must include a nonblank `sessionId`:
+`mcpServers[].env` is an array of `{ name: string, value: string }`, not an environment object. Both session/new and session/resume include `systemPromptAppend` from `ready.systemPrompt`. The appended server instructions include native `<mention userId="member-id" />` syntax and publication/tool rules. A new result must include a nonblank `sessionId`:
 
 ```json
 {"jsonrpc":"2.0","id":2,"result":{"sessionId":"00000000-0000-4000-8000-000000000001","models":{"availableModels":[],"currentModelId":"<upstream-model-id>"},"modes":{"currentModeId":"default","availableModes":[]}}}
@@ -54,10 +54,10 @@ The response must contain `result.protocolVersion === 1`. `agentCapabilities`, `
 A saved GroupChat mapping uses:
 
 ```json
-{"jsonrpc":"2.0","id":3,"method":"session/resume","params":{"sessionId":"00000000-0000-4000-8000-000000000001","cwd":"/path/to/workspace","mcpServers":[{"name":"nia-teams","command":"<Node executable>","args":["<installed package>/dist/mcp-server.js"],"env":[{"name":"NIA_AGY_MCP_URL","value":"http://127.0.0.1:<ephemeral-port>/tool"},{"name":"NIA_AGY_MCP_TOKEN","value":"<fresh turn capability>"}]}]}}
+{"jsonrpc":"2.0","id":3,"method":"session/resume","params":{"sessionId":"00000000-0000-4000-8000-000000000001","cwd":"/path/to/workspace","mcpServers":[{"name":"nia-teams","command":"<Node executable>","args":["<installed package>/dist/mcp-server.js"],"env":[{"name":"NIA_AGY_MCP_URL","value":"http://127.0.0.1:<ephemeral-port>/tool"},{"name":"NIA_AGY_MCP_TOKEN","value":"<fresh session capability>"}]}]}}
 ```
 
-An explicit JSON-RPC error from resume permits `session/new`; transport failure, timeout, malformed response, and returned identity mismatch do not. A successful resume may omit `sessionId`; if supplied it must equal the saved ID. The resulting ID is persisted by core `ThreadMapStore` through `context.session`, under `agentThreadId` with `groupChatId` and timestamp. No second durable mapping is maintained in this package.
+An explicit JSON-RPC error from resume permits `session/new`; transport failure, timeout, malformed response, and returned identity mismatch do not. A successful resume may omit `sessionId`; if supplied it must equal the saved ID. Core `ThreadMapStore` persists the ACP ID under `agentThreadId` alongside the Nia session ID, GroupChat ID, cwd, and timestamp. No second durable mapping is maintained in this package.
 
 Optional configuration follows session setup and precedes the prompt:
 
@@ -78,7 +78,7 @@ Modes: `default`, `accept-edits`, `auto`, `plan`. Omitted `fullAuto` adds the sp
 
 ACP assistant message chunks remain private and are not accumulated for publication. Thought/tool updates report activity. Only explicit `send_message` publishes, while `end_turn` reports idle with `deliveryId`.
 
-Core SessionHost serializes per-chat turns; only explicit `send_message` calls publish. Turn-end assistant text is always private.
+A configured ACP session and its scope are reused across turns until the Nia session rotates, the agent is removed, or the ACP generation closes. Before session setup finishes, waiting messages are joined with `\n\n` in one prompt. While a prompt is active, new messages send another `session/prompt` to the same session immediately. Only the latest request can settle the turn; earlier replies or errors are ignored. The final idle uses the latest processed `deliveryId` and follows queued publications.
 
 ## 5. Server permission request
 
@@ -93,7 +93,7 @@ Core SessionHost serializes per-chat turns; only explicit `send_message` calls p
 }
 ```
 
-In opt-in approval mode, the adapter invokes `context.permission('agy:<tool-name>', { sessionId, toolCall, options })`. Prefixing the tool name prevents an ACP tool from impersonating core's `AskUserQuestion` path. SessionHost adds `agentThreadId`, turn ID, and tool/input to `verifyArguments` and requests a TaskBar card with verifier tool `agy.approval`, server `agent-bridge`.
+In opt-in approval mode, `AgyHost` requests a TaskBar card via `card.upsert` with verifier tool `agy.approval`, server `agent-bridge`. `verifyArguments` binds the `agentThreadId`, turn ID, `agy:<tool-name>`, and ACP permission input `{ sessionId, toolCall, options }`. A verdict, timeout or cancellation closes the card via `card.cancel`.
 
 Approval requires core `verifyCardApproval` to validate RS256 signature via `${issuer}/oauth2/jwks`, issuer, audience `nia-teams-workload`, service principal, human confirmation, lifetime, card ID, context tool, and canonical JSON argument SHA-256 digest. GroupChat membership alone is not Agent approval membership.
 
@@ -107,9 +107,9 @@ Use `allow_once` in full-auto or on verified opt-in approval and `reject_once` o
 
 ## 6. Scoped MCP transport
 
-The bundled `dist/mcp-server.js` uses `@modelcontextprotocol/sdk` stdio transport. It lists every `ready.tools` definition with `name`, `description`, and raw `inputSchema`; `deferLoading` is stripped because Antigravity has no native ToolSearch. Calls verify membership in the turn contract, delegate to `context.callTool` and `tool.call`, and return the content string once with `isError` preserved. Nia Teams MCP names (`mcp__nia-teams__`, `nia-teams___`, or server name `nia-teams`) bypass duplicate local permission cards.
+The bundled `dist/mcp-server.js` uses `@modelcontextprotocol/sdk` stdio transport. It lists every `ready.tools` definition with `name`, `description`, and raw `inputSchema`; `deferLoading` is stripped because Antigravity has no native ToolSearch. Calls check the session's tool contract, route `send_message` through `PublicationQueue` and other tools directly to `tool.call`, and return the content string once with `isError` preserved. Nia Teams MCP names (`mcp__nia-teams__`, `nia-teams___`, or server name `nia-teams`) bypass duplicate local permission cards.
 
-The daemon binds one ephemeral HTTP relay to `127.0.0.1`. Each turn receives a random 256-bit capability; its helper only accesses that host-supplied context, never a model-selected chat/session. Revocation occurs when the turn finishes or aborts. Unknown tools, wrong tokens, and stale/aborted contexts fail locally; argument validation belongs to Nia Teams. Bridge credentials and private keys are not sent to helpers. The URL and token are local process environment, not persistent state. Helpers restrict endpoints to loopback HTTP `/tool` and reject redirects.
+The daemon binds one ephemeral HTTP relay to `127.0.0.1`. Each opened session receives a random 256-bit capability. A helper uses the host's active turn for that session, with no model-selected routing. The capability is revoked when the session is discarded and grants no access between prompts. Unknown tools, wrong tokens, and stale/aborted contexts fail locally; argument validation belongs to Nia Teams. Bridge credentials and private keys are not sent to helpers. The URL and token are local process environment, not persistent state. Helpers restrict endpoints to loopback HTTP `/tool` and reject redirects.
 
 ## 7. Cancellation and process ownership
 
@@ -117,4 +117,4 @@ The daemon binds one ephemeral HTTP relay to `127.0.0.1`. Each turn receives a r
 {"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"<sid>"}}
 ```
 
-Abort sends a notification without awaiting a separate reply. If the in-flight request does not settle within 2 seconds, terminate that child (SIGTERM, then SIGKILL after 500 ms if needed). Other active turns in that child fail rather than being replayed. Later turns initialize a new generation and resume saved sessions where supported. Adapter close reaps owned children and closes the MCP relay. CLI uses core `runSessionDaemon` and always awaits runner close in finally.
+Abort sends a notification without awaiting a separate reply. If the in-flight request does not settle within 2 seconds, terminate that child (SIGTERM, then SIGKILL after 500 ms if needed). Other active turns in that child fail rather than being replayed. Later turns initialize a new generation and resume saved sessions where supported. Adapter close reaps owned children and closes the MCP relay. CLI uses core `runBridgeDaemon` for process registration and `AgyHost` startup and shutdown. Removal also deletes the durable session binding.

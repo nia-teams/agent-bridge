@@ -21,8 +21,8 @@
 - Repository Markdown has no title frontmatter; skill frontmatter has only name and English description. Public docs use https://nia-teams.com and fictional IDs.
 
 - Antigravity uses one persistent ACP child with per-chat sessions supplied by core ThreadMapStore. Match client responses by ID; route server updates/permissions by ACP sessionId and child generation.
-- ACP permission verdicts use context.permission (not an invented requestApproval API), verifier tool agy.approval, and one-shot option IDs. Scoped MCP helpers get ephemeral per-turn loopback capabilities, never Nia private keys.
-- Abort sends session/cancel, terminates an unresponsive generation after two seconds, and never replays a failed prompt. Only explicit resume RPC errors permit session/new. CLI owns runner.close in finally around runSessionDaemon.
+- AgyHost handles signed ACP permission verdicts with verifier tool agy.approval and one-shot option IDs. Scoped MCP helpers get ephemeral per-session loopback capabilities, usable only during an active prompt, never Nia private keys.
+- Abort sends session/cancel, terminates an unresponsive generation after two seconds, and never replays a failed prompt. Only explicit resume RPC errors permit session/new. CLI uses core runBridgeDaemon to own AgyHost startup and shutdown. Overlapping prompts in one ACP session steer the current turn; only the latest prompt settles it.
 
 - Factory Droid uses @factory/droid-sdk/node with a connected ProcessTransport for browser or API-key login. Close session, transport and SDK MCP server in finally. Only SessionNotFoundError before prompting permits session creation; never replay a stream. Explicit resumed model/effort/autonomy use updateSettings; runtime permission names use droid: to avoid AskUserQuestion dispatch.
 

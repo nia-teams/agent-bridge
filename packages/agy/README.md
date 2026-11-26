@@ -112,13 +112,13 @@ GroupChats have separate model contexts but share the files, repository, and loc
 
 #### ACP sessions, streaming replies, and concurrent chats
 
-Core `SessionHost` / `ThreadMapStore` stores each chat's ACP `sessionId` in `~/.config/nia-teams-agy/threads.json`. A later turn calls `session/resume` with the same cwd and a fresh MCP turn scope. An explicit resume JSON-RPC error permits `session/new` and mapping replacement; transport failures, child exit, and timeouts do not replay the task.
+`AgyHost` uses core `ThreadMapStore` to persist ACP session IDs in `~/.config/nia-teams-agy/threads.json`. Turns reuse the configured ACP session and MCP scope while the Nia session, working directory, and ACP process remain unchanged. Reopening after a process restart can call `session/resume` for a matching mapping. An explicit resume JSON-RPC error permits `session/new` and mapping replacement; transport failures, child exit, and timeouts do not replay the task.
 
 New sessions append GroupChat collaboration instructions. Optional `session/set_mode` and `session/set_model` requests precede `session/prompt`; both new and resumed sessions apply explicit configuration. Modes are `default`, `accept-edits`, `auto`, and `plan`; models come from Antigravity account availability.
 
 Streamed output stays on the host. Thinking and tool updates sync live activity status; GroupChat replies are published through `send_message`.
 
-SessionHost serializes turns within a GroupChat while different ACP sessions can run concurrently in the same child. Client requests match response IDs; notifications and permission requests route by `params.sessionId`. Server request IDs remain independent even when they collide with client request IDs.
+A message arriving during a prompt steers the same ACP session immediately. Only the latest prompt can finish the turn, reporting idle with its delivery ID. Messages accumulated while opening a session are combined into one prompt. Different ACP sessions can run concurrently in the same child. Client requests match response IDs; notifications and permission requests route by `params.sessionId`. Server request IDs remain independent even when they collide with client request IDs.
 
 Abort sends `session/cancel`. If the request does not settle within two seconds, the daemon terminates the child and escalates SIGTERM to SIGKILL when necessary. Other active turns in that child fail without replay. Later tasks initialize a new child generation and resume saved Antigravity sessions where supported.
 
@@ -181,15 +181,13 @@ For compatibility, `--full-auto` and `--bypass-approvals` match the default and 
 | Entrypoint | Purpose |
 | --- | --- |
 | `nia-agy` | Pairing, identity inspection, and daemon |
-| `AgyRunner` | Own the ACP child with `run(context)` and `close()` |
-| `createAgyRunner` | Create a core TurnRunner with asynchronous `close()` |
+| `AgyHost` | Own the ACP lifecycle, per-chat sessions, and approvals with `start()` and `close()` |
 | `resolveAgyBinary` | Resolve explicit selection, environment, PATH, and installation locations |
 | `AcpClient` / `AcpRpcError` | Multiplex requests, notifications, server requests, and explicit RPC errors |
-| `SessionHost` | Reuse core queues, private state, approvals, and cancellation |
-| `AgyOptions` / `AgyMode` / `AcpMessage` | TypeScript runner, mode, and message types |
+| `AgyBridge` / `AgyOptions` / `AgyMode` / `AcpMessage` | TypeScript host, mode, and message types |
 | `dist/**/*.d.ts` | Exact method signatures and configuration |
 
-Public export-map entries are `.` and `./package.json`. For embedding, pass `createAgyRunner(options)` to core `runSessionDaemon` and await `runner.close()` in finally. Do not maintain another durable session mapping outside core. Frames, timeouts, and cancellation are specified in [docs/SPECIFICATION.md](./docs/SPECIFICATION.md).
+Public export-map entries are `.` and `./package.json`. For embedding, construct `new AgyHost(bridge, options)` and start it before connecting the bridge. Core `runBridgeDaemon` can manage startup and shutdown. Frames, timeouts, and cancellation are specified in [docs/SPECIFICATION.md](./docs/SPECIFICATION.md).
 
 ## 4. Approvals, GroupChat Tools & Security Boundaries
 
@@ -216,7 +214,7 @@ Nia Teams supplies the available collaboration tools, including chat management,
 
 - GroupChat tools belong to the active turn. After interruption or Nia session rotation, old requests cannot publish into the new GroupChat session.
 
-The bundled MCP service uses a temporary per-turn credential to access the current GroupChat; the credential expires when the turn ends. MCP helpers do not read the Nia Teams private key. See the [protocol specification](./docs/SPECIFICATION.md) for messages and request scope.
+The bundled MCP service uses a temporary per-session credential that grants access to the current GroupChat only while a prompt is active. MCP helpers do not read the Nia Teams private key. See the [protocol specification](./docs/SPECIFICATION.md) for messages and request scope.
 
 Incoming prompts list `Members: Alice (<userId>), ...`; each message includes sender ID, timestamp, message ID, reply reference, and attachment transcripts. Generic headers may appear as `[chat:<chatId>] Alice (<userId>): ...`, or structured channels may expose `senderId`; raw bridge frames use `messages[].authorId`. Use `<mention userId="24-hex-id" />` with a received sender/member ID for native notifications.
 

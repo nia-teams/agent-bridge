@@ -23,7 +23,7 @@ export function toolsFingerprint(tools: unknown): string { return createHash('sh
 
 export type CodexBridge = Pick<BridgeClient, 'getContract' | 'credentials' | 'rpc' | 'onReady' | 'onThreadMessage' | 'onCardAction' | 'onThreadCancel' | 'verifyCardApproval'>;
 export interface CodexOptions { configDir: string; cwd: string; model?: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'; fullAuto?: boolean; codexBin?: string; approvalTimeoutMs?: number; activityRefreshMs?: number; onError?: (error: Error) => void }
-interface Turn { finishing?: boolean; id?: string; controller: AbortController }
+interface Turn { frame: ThreadMessage; finishing?: boolean; id?: string; controller: AbortController }
 interface Thread { frame: ThreadMessage; codexId?: string; turn?: Turn; queued: ThreadMessage[]; items: Map<string, JsonObject> }
 interface Approval { id: string | number; method: string; thread: Thread; turn: Turn; args: JsonObject; timer: ReturnType<typeof setTimeout> }
 
@@ -67,7 +67,8 @@ export class CodexHost {
       return this.lease.report(thread.frame.agentThreadId, thread.frame.sessionId, state, { label, signal: thread.turn.controller.signal });
     }
     this.lease.clear(thread.frame.agentThreadId);
-    return this.bridge.rpc('thread.activity', { sessionId: thread.frame.sessionId, state, ...(state === 'idle' ? { deliveryId: thread.frame.deliveryId } : {}), ...(label ? { label } : {}), ...(errorMessage ? { errorMessage } : {}) });
+    const frame = thread.turn?.frame ?? thread.frame;
+    return this.bridge.rpc('thread.activity', { sessionId: frame.sessionId, state, deliveryId: frame.deliveryId, ...(label ? { label } : {}), ...(errorMessage ? { errorMessage } : {}) });
   }
   private sleepGuard(): void {
     const active = [...this.threads.values()].some(t => t.turn);
@@ -84,16 +85,18 @@ export class CodexHost {
       thread.frame = frame;
       if (thread.turn) {
         try {
-          if (!thread.turn.id) throw new Error('Turn is starting');
-          await this.app.request('turn/steer', { threadId: thread.codexId, expectedTurnId: thread.turn.id, input: this.input(frame) });
+          if (!thread.turn.id || thread.turn.finishing || thread.queued.length) throw new Error('Turn cannot accept steering');
+          await this.app.request('turn/steer', { threadId: thread.codexId, expectedTurnId: thread.turn.id, input: this.input(resolveThreadPrompt(frame)) });
+          thread.turn.frame = frame;
         } catch { thread.queued.push(frame); }
         return;
       }
-      await this.begin(thread, frame);
+      await this.begin(thread, [frame]);
     });
   }
-  private input(frame: ThreadMessage): JsonObject[] { return [{ type: 'text', text: resolveThreadPrompt(frame), text_elements: [] }]; }
-  private async begin(thread: Thread, frame: ThreadMessage): Promise<void> {
+  private input(text: string): JsonObject[] { return [{ type: 'text', text, text_elements: [] }]; }
+  private async begin(thread: Thread, batch: ThreadMessage[]): Promise<void> {
+    const frame = batch.at(-1)!;
     const contract = this.bridge.getContract();
     if (!contract) throw new Error('Bridge contract is missing');
     // Resolve the effective provider before thread/start: custom providers may not
@@ -115,11 +118,11 @@ export class CodexHost {
     if (typeof codexId !== 'string' || !codexId) throw new Error('Codex did not return a thread id');
     thread.codexId = codexId;
     await this.store.set(frame.agentThreadId, { protocolVersion: 3, toolsFingerprint: fingerprint, codexThreadId: codexId, groupChatId: frame.groupChatId, updatedAt: new Date().toISOString() });
-    const turn: Turn = { controller: new AbortController() };
+    const turn: Turn = { frame, controller: new AbortController() };
     thread.turn = turn; thread.items.clear(); this.sleepGuard();
     try {
       await this.activity(thread, 'executing', 'Thinking in Codex…');
-      const started = await this.app.request('turn/start', { threadId: codexId, input: this.input(frame) });
+      const started = await this.app.request('turn/start', { threadId: codexId, input: this.input(batch.map(resolveThreadPrompt).join('\n\n')) });
       turn.id ??= started.turn?.id ?? started.turnId;
       if (!turn.id) throw new Error('Codex did not return a turn id');
     } catch (error) {
@@ -156,7 +159,7 @@ export class CodexHost {
       this.lease.clear(thread.frame.agentThreadId);
       await this.serialize(thread.frame.agentThreadId, async () => {
         if (thread.turn !== turn) return;
-        const frame = thread.frame;
+        const frame = turn.frame;
         this.lease.clear(frame.agentThreadId);
         await this.cancelCards(thread);
         try {
@@ -168,8 +171,11 @@ export class CodexHost {
           await this.activity(thread, 'idle', undefined, String(error));
         }
         thread.turn = undefined; this.sleepGuard();
-        const queued = thread.queued.shift();
-        if (queued) { thread.frame = queued; await this.begin(thread, queued); }
+        if (thread.queued.length) {
+          const sessionId = thread.queued[0]!.sessionId;
+          const boundary = thread.queued.findIndex(frame => frame.sessionId !== sessionId);
+          await this.begin(thread, thread.queued.splice(0, boundary === -1 ? thread.queued.length : boundary));
+        }
       });
     }
   }

@@ -96,18 +96,26 @@ test('thread.cancel interrupts active turn and declines/cancels pending card', a
   assert.equal(f.rpcs.filter(r => (r.method === 'tool.call' && r.params.name === 'send_message')).length, 0);
 });
 
-test('steer includes expectedTurnId; rejected steering queues next turn; resume failure starts replacement', async t => {
+test('steer includes expectedTurnId; rejected steering batches queued frames into one next turn; resume failure starts replacement', async t => {
   const { f, host, log, emit, active } = await setup(t);
   const ids = await active();
   await host.message(message('steer hold'));
   assert.equal((await log()).find(m => m.method === 'turn/steer').params.expectedTurnId, ids.turnId);
   await host.app.request('test/config', { rejectSteer: true, failResume: true });
-  await host.message(message('queued hold'));
+  const first = { ...message(), prompt: 'queued first' };
+  const latest = { ...message(), prompt: 'queued second' };
+  await host.message(first); await host.message(latest);
   await emit(complete(ids));
   let entries;
   for (let i = 0; i < 200; i++) { entries = await log(); if (entries.filter(m => m.method === 'turn/start').length === 2) break; await new Promise(r => setTimeout(r, 5)); }
   assert.equal(entries.filter(m => m.method === 'turn/start').length, 2);
   assert.equal(entries.filter(m => m.method === 'thread/start').length, 2);
+  assert.equal(entries.filter(m => m.method === 'turn/start')[1].params.input[0].text, 'queued first\n\nqueued second');
+  const idles = () => f.rpcs.filter(r => r.params.state === 'idle');
+  await until(() => idles().length === 2);
+  assert.notEqual(idles()[0].params.deliveryId, latest.deliveryId);
+  assert.equal(idles()[1].params.deliveryId, latest.deliveryId);
+  assert.equal((await log()).filter(m => m.method === 'turn/start').length, 2);
 });
 
 test('independent GroupChat threads, session rotation interrupts old turn, delta-only final and turn errors', async t => {

@@ -3,8 +3,8 @@ import { maybeRespawnDaemon } from '@nia-teams/agent-bridge-core';
 import { clientBranding } from './branding.js';
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
-import { defaultConfigDir, loadCredentials, runPairingCli, runSessionDaemon } from '@nia-teams/agent-bridge-core';
-import { createAgyRunner, resolveAgyBinary, type AgyMode } from './runner.js';
+import { defaultConfigDir, loadCredentials, runPairingCli, runBridgeDaemon } from '@nia-teams/agent-bridge-core';
+import { AgyHost, resolveAgyBinary, type AgyMode } from './host.js';
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     'group-link': { type: 'string' }, 'agent-name': { type: 'string' }, 'no-browser': { type: 'boolean' }, 'no-start': { type: 'boolean' },
@@ -38,7 +38,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (positionals[0] !== 'start') throw new Error('Unknown command: use pair, status, or start');
   if (await maybeRespawnDaemon(args, resolve(configDir, 'daemon.log'))) return;
   const cwd = resolve(values.cwd ?? process.cwd());
-  const runner = createAgyRunner({ cwd, agyBin: values['agy-bin'], model: values.model, mode: values.mode as AgyMode | undefined, sandbox: values.sandbox, fullAuto });
-  try { await resolveAgyBinary(values['agy-bin']); await runSessionDaemon(runner, { ...clientBranding, configDir, cwd, runtime: 'Antigravity', approvalTool: 'agy.approval', fullAuto }); }
-  finally { await runner.close(); }
+  const agyBin = await resolveAgyBinary(values['agy-bin']);
+  await runBridgeDaemon({ ...clientBranding, configDir }, (bridge, onError) => new AgyHost(bridge, {
+    configDir, cwd, agyBin, model: values.model, mode: values.mode as AgyMode | undefined, sandbox: values.sandbox, fullAuto, onError,
+  }));
 }

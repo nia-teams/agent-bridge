@@ -1,5 +1,4 @@
-export { AgyRunner, createAgyRunner, resolveAgyBinary } from './runner.js';
-export type { AgyOptions, AgyMode } from './runner.js';
+export { AgyHost, resolveAgyBinary } from './host.js';
+export type { AgyOptions, AgyMode, AgyBridge } from './host.js';
 export { AcpClient, AcpRpcError } from './acp-client.js';
 export type { AcpMessage } from './acp-client.js';
-export { SessionHost } from '@nia-teams/agent-bridge-core';

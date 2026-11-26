@@ -113,13 +113,13 @@ pgrep -af '[n]ia-agy.*start'
 
 #### ACP 会话、流式回复与多群并发
 
-核心 `SessionHost` / `ThreadMapStore` 将每个群聊的 ACP `sessionId` 保存到 `~/.config/nia-teams-agy/threads.json`。下一轮执行 `session/resume` 并带上同一 cwd 与本轮 MCP 工具配置；`agy acp` 服务返回 JSON-RPC 恢复错误时，再用 `session/new` 创建替代会话并更新映射。网络错误、子进程退出和超时不会触发重复发送任务。
+`AgyHost` 通过 core `ThreadMapStore` 将 ACP 会话 ID 保存到 `~/.config/nia-teams-agy/threads.json`。Nia 会话、工作目录和 ACP 进程不变时，后续轮次复用同一个 ACP 会话与 MCP 作用域。进程重启后，可以通过 `session/resume` 恢复匹配的会话；`agy acp` 服务返回 JSON-RPC 恢复错误时，再用 `session/new` 创建替代会话并更新映射。网络错误、子进程退出和超时不会触发重复发送任务。
 
 创建会话时附加群聊协作指令，随后按需调用 `session/set_mode` 与 `session/set_model`，最后发送 `session/prompt`。模型由 agy 返回的可用模型决定，模式可选 `default`、`accept-edits`、`auto`、`plan`。新会话和恢复会话都会应用显式模式与模型。
 
 流式输出留在本机，思考与工具更新同步活动状态；群聊回复通过 `send_message` 发布。
 
-同一群聊的轮次由 SessionHost 串行执行，不同群聊可在同一个 ACP 子进程中并发。客户端按 JSON-RPC ID 匹配响应，按 `params.sessionId` 路由流式更新和权限请求；服务端请求 ID 即使与客户端请求相同，也不会混淆为响应。
+一轮执行期间，新消息会立即发送到同一个 ACP 会话进行引导；只有最新 prompt 完成才结束本轮，并用其投递 ID 同步空闲状态。会话初始化期间积压的消息会合并为一个 prompt。不同群聊可在同一个 ACP 子进程中并发。客户端按 JSON-RPC ID 匹配响应，按 `params.sessionId` 路由流式更新和权限请求；服务端请求 ID 即使与客户端请求相同，也不会混淆为响应。
 
 取消会发送 `session/cancel` 通知。`agy acp` 服务在 2 秒内仍未结束时，桥接结束该子进程，必要时在 SIGTERM 后追加 SIGKILL。该进程中的其他活跃轮次随之失败，不重放；后续任务重新初始化子进程并恢复已保存会话。
 
@@ -181,15 +181,13 @@ nia-agy --help
 | 入口 | 用途 |
 | --- | --- |
 | `nia-agy` | 配对、身份检查和后台守护进程 |
-| `AgyRunner` | 持有 ACP 子进程，提供 `run(context)` 与 `close()` |
-| `createAgyRunner` | 创建带有异步 `close()` 的 core TurnRunner |
+| `AgyHost` | 管理 ACP 进程、群聊会话与审批，提供 `start()` 和 `close()` |
 | `resolveAgyBinary` | 按显式路径、环境变量、PATH 与安装目录定位 agy |
 | `AcpClient` / `AcpRpcError` | JSON-RPC 请求复用、通知、双向请求与 `agy acp` 服务返回的错误 |
-| `SessionHost` | 复用 core 群聊队列、私有状态、确认卡与取消 |
-| `AgyOptions` / `AgyMode` / `AcpMessage` | 运行器、模式与协议消息的 TypeScript 类型 |
+| `AgyBridge` / `AgyOptions` / `AgyMode` / `AcpMessage` | 运行器、模式与协议消息的 TypeScript 类型 |
 | `dist/**/*.d.ts` | 导出方法与配置的准确签名 |
 
-包的公开入口为 `.` 与 `./package.json`。嵌入时把 `createAgyRunner(options)` 交给 core 的 `runSessionDaemon`，在 `finally` 中等待 `runner.close()`；不要在另一个实现中重复持久化 ACP 会话。协议报文、超时与取消规则见 [docs/SPECIFICATION.md](./docs/SPECIFICATION.md)。
+包的公开入口为 `.` 与 `./package.json`。嵌入时构造 `new AgyHost(bridge, options)`，在连接 bridge 前启动 host。也可交给 core 的 `runBridgeDaemon` 管理启动和关闭。协议报文、超时与取消规则见 [docs/SPECIFICATION.md](./docs/SPECIFICATION.md)。
 
 ## 四、权限确认、群聊工具与安全边界
 
@@ -216,7 +214,7 @@ Nia Teams 提供可用的协作工具，包括群聊管理、提醒和分享链�
 
 - 群聊工具限定在当前活跃轮次；中断或群聊会话切换后，旧工具请求不能继续向新的群聊会话发布。
 
-群聊工具由随包的 MCP 服务提供，使用单轮临时凭证访问当前群聊；轮次结束后凭证失效。MCP 进程不读取 Nia Teams 私钥。报文与调用范围见 [协议规范](./docs/SPECIFICATION.md)。
+群聊工具由随包的 MCP 服务提供，在 ACP 会话内复用临时凭证，只有 prompt 执行期间才能访问当前群聊。MCP 进程不读取 Nia Teams 私钥。报文与调用范围见 [协议规范](./docs/SPECIFICATION.md)。
 
 传入提示列出 `Members: Alice (<userId>), ...`，消息段列出发送者 ID、时间、消息 ID、回复关系与附件转写。通用消息也可表现为 `[chat:<chatId>] Alice (<userId>): ...`，结构化频道可携带 `senderId`；原始桥接帧字段为 `messages[].authorId`。回复中使用 `<mention userId="24-hex-id" />` 触发原生通知，ID 从发送者或成员列表取得。
 

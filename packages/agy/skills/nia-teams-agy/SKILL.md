@@ -11,7 +11,7 @@ Connect local Google Antigravity CLI (`agy`) into Nia Teams as an Agent that com
 
 - Antigravity owns model execution, local tools, and sandbox enforcement via `agy acp`; this bridge manages per-GroupChat ACP sessions and verifies opt-in TaskBar approvals.
 - Requires Node.js 20+ and an installed, authenticated `agy` CLI (verified on agy 1.4.10 / ACP Server 1.5.4).
-- Each GroupChat keeps a persistent ACP session while sharing the selected workspace.
+- Each GroupChat keeps a persistent ACP session while sharing the selected workspace. New messages can steer that session while it is running.
 - Keep credentials in the local config directory (`0700` dir / `0600` file) and run one daemon per config directory.
 
 ## Autonomous Setup & Daemon Launch

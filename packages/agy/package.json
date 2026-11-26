@@ -1,6 +1,6 @@
 {
   "name": "@nia-teams/agy-bridge",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Connect Google Antigravity CLI to Nia Teams group chats through ACP",
   "type": "module",
   "license": "MIT",
@@ -42,7 +42,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@nia-teams/agent-bridge-core": "^0.3.7",
+    "@nia-teams/agent-bridge-core": "^0.3.8",
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "publishConfig": {

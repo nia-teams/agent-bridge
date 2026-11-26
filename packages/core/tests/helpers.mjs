@@ -96,11 +96,11 @@ export async function fixture(t) {
   fixture.credentials = { serverUrl: fixture.url, teamId, agentSlug: 'helper', agentName: 'Helper', issuer: fixture.url, keyGeneration: 1, hostLabel: 'test host', publicKeyPem: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString().trim(), privateKeyPem: keys.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), pairedAt: new Date().toISOString() };
   await saveCredentials(fixture.credentials, dir);
   fixture.send = frame => { assert.ok(fixture.socket); fixture.socket.send(JSON.stringify(frame)); };
-  fixture.confirm = async (card, { tamper = false, decision = 'approved', claims, tokenTransform } = {}) => {
+  fixture.confirm = async (card, { tamper = false, decision = 'approved', claims, tokenTransform, thread = { groupChatId, agentThreadId } } = {}) => {
     const token = await signTestConfirmationToken(fixture.provider, { server: 'agent-bridge', tool: card.params.verifyToolName,
       arguments: tamper ? { ...card.params.verifyArguments, altered: true } : card.params.verifyArguments, cardId: card.params.cardId, claims,
     });
-    fixture.send({ type: 'card.action', protocolVersion: 3, deliveryId: randomUUID(), sessionId: card.params.sessionId, groupChatId, agentThreadId,
+    fixture.send({ type: 'card.action', protocolVersion: 3, deliveryId: randomUUID(), sessionId: card.params.sessionId, groupChatId: thread.groupChatId, agentThreadId: thread.agentThreadId,
       cardId: card.params.cardId, decision, clickedBy: { userId, name: 'Alex', teamRole: 'member' }, _meta: { 'nia/confirmationToken': tokenTransform ? tokenTransform(token) : token } });
   };
   wss.on('connection', ws => {

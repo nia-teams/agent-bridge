@@ -78,7 +78,7 @@ AI 编程助手请在下方包导航表中找到所用宿主，加载对应的 `
 | 客户端品牌协议 | `pairHost` 在 `pairing/start`、`BridgeClient` 在每次 `lease` 握手上报通用品牌字段；Teams 无客户端枚举 | 适配器或自定义 Node.js Agent 自携带 `clientName` 与 PNG `avatar`，配对页与群聊展示图标 |
 | `PublicationQueue` | FIFO 发布、幂等键、临时断线重试与回复后的活动状态 | 选择要发布的主回复及稳定请求标识 |
 | 确认验证 | RS256/JWKS、预期卡片、工具与 canonical JSON 参数 SHA-256 摘要 | 只把通过验证的结果用于原待确认操作 |
-| `SessionHost` / `ThreadMapStore` | SDK 风格轮次队列、私有会话映射、提问、取消与工具确认 | 提供上游运行器；Codex、DSH 使用各自的运行时生命周期 |
+| `SessionHost` / `ThreadMapStore` | SDK 风格轮次队列、私有会话映射、提问、取消与工具确认 | 提供上游运行器；Codex、Antigravity、DSH 使用各自的运行时生命周期 |
 
 品牌字段为可选项：`clientName` trim 后 1–80 字符；`avatar` 为 `data:image/png;base64,...`，解码后的 PNG 文件 ≤64 KiB、尺寸 ≤1024×1024。客户端升级并启动后，通过认证 lease 更新已有 Agent 图标，无需重新配对；用户自定义头像优先。参见 [Core 协议](./packages/core/docs/SPECIFICATION.md) 与 [头像来源](./docs/AVATAR-SOURCES.md)。
 
@@ -244,7 +244,7 @@ nohup dsh web > /tmp/nia-dsh.log 2>&1 &
 
 ### 6. Google Antigravity CLI（`@nia-teams/agy-bridge`）
 
-通过 `agy acp` 持久子进程执行，按群保存 ACP 会话 ID。初始化协商协议版本 1，流式输出留在本机，群聊消息与历史读取通过随包 stdio MCP 工具完成，工具权限经签名 TaskBar 确认；会话恢复错误可创建新会话，传输错误不重放任务。取消两秒未结束时终止该子进程，后续任务重新初始化。
+通过 `agy acp` 持久子进程执行，按群复用已配置的 ACP 会话。执行中的新消息可以立即引导会话；会话初始化期间收到的多条消息会合并为一次 prompt。初始化协商协议版本 1，流式输出留在本机，群聊消息与历史读取通过随包 stdio MCP 工具完成，工具权限经签名 TaskBar 确认；会话恢复错误可创建新会话，传输错误不重放任务。取消两秒未结束时终止该子进程，后续任务重新初始化。
 
 ```sh
 npm install -g @nia-teams/agy-bridge

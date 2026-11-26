@@ -94,7 +94,10 @@ export class SessionHost {
   }
   private async drain(thread: Thread): Promise<void> {
     while (thread.queue.length && !this.closed) {
-      const frame = thread.queue.shift()!;
+      const sessionId = thread.queue[0]!.sessionId;
+      const boundary = thread.queue.findIndex(frame => frame.sessionId !== sessionId);
+      const batch = thread.queue.splice(0, boundary === -1 ? thread.queue.length : boundary);
+      const frame = batch.at(-1)!;
       const active: Active = { controller: new AbortController(), id: randomUUID() };
       thread.active = active; this.guard();
       const signal = active.controller.signal;
@@ -122,7 +125,7 @@ export class SessionHost {
           const result = await this.bridge.rpc('tool.call', { sessionId: frame.sessionId, toolCallId, name, arguments: args }, signal);
           return { content: typeof result.content === 'string' ? result.content : JSON.stringify(result), ...(result.isError ? { isError: true } : {}) };
         };
-        const context: TurnContext = { ...contract, deliveryId: frame.deliveryId, prompt: resolveThreadPrompt(frame), resume, signal, turnId: active.id,
+        const context: TurnContext = { ...contract, deliveryId: frame.deliveryId, prompt: batch.map(resolveThreadPrompt).join('\n\n'), resume, signal, turnId: active.id,
           session: async id => { signal.throwIfAborted(); if (!id) throw new Error('Empty runtime session id'); await this.store.set(frame.agentThreadId, { sessionId: id, groupChatId: frame.groupChatId, updatedAt: new Date().toISOString(), cwd }); },
           activity: (state, label) => this.activity(thread, frame, active, state, label),
           callTool,
